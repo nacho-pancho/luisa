@@ -1,6 +1,9 @@
 # LUISA
 
+
 Este repositorio contiene la descripción, datos, instrucciones y material de apoyo para trabajar en los distintos subproblemas que involucran al sistema LUISA de transcripción de documentos.
+
+## Problemas
 
 Los problemas están organizados por carpetas, siendo lo único común a todos el conjunto de datos sobre el que se trabajará, que es siempre el mismo. Éste conjunto se encuentra en la carpeta datos.
 
@@ -16,3 +19,12 @@ La siguiente es una lista de los proyectos disponibles al momento. Cada carpeta 
 * web -- mejorar la interfaz web de LUISA en general
 * webmobil -- mejorar la interfaz web de LUISA para dispositivos moviles
 * luisaapp -- desarrollar una app para LUISA, si es que eso representa alguna ventaja en usabilidad respecto a usar un navegador en el celular.
+
+## Premisas
+
+* El código que se escriba debe ser claro, mucho y muy bien documentado
+* Debe buscarse la portabilidad -- adherirse a estándares bien establecidos; no usar las últimas versiones de nada. 
+* En particular, para C se recomienda el estándar C99; para C++ el C++11; Python 3.6.x a 3.7.x
+* Para proyectos en C o C++ se recomienda usar herramientas de desarrollo de Unix tipo Make
+* En caso de C o C++ se debe verificar que no se produzcan pérdidas de memoria (por ejemplo usando valgrind)
+
