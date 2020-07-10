@@ -152,8 +152,7 @@ int main ( int argc, char **argv ) {
   puts ( "Parsing arguments...\n" );
   argp_parse ( &argp, argc, argv, 0, 0, &cfg );
 
-  time_t t0;
-  time(&t0);
+  clock_t t0 = clock();
   /*
    * read file list
    */
@@ -229,7 +228,9 @@ int main ( int argc, char **argv ) {
     printf("DONE.\n");
   }  
   free(line);
-  printf( "Elapsed time: %7.5lu s\n", time(NULL) - t0 );
+  clock_t t1 = clock();
+  double dt = ((double)( t1 - t0 )) / (double)CLOCKS_PER_SEC;
+  printf( "Elapsed time: %f s\n", dt );
   free(path);
   fprintf(stdout,"Cleanup.\n");
   fprintf(stdout,"Bye.\n");
