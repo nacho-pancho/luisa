@@ -28,9 +28,13 @@ typedef struct image {
 } image_t;
 
 int read_pbm_header(FILE* fimg, int* nrows, int *ncols );
+
 image_t* read_pbm_data(FILE* fimg, const int nrows, const int ncols);
+
 int write_pbm(const image_t* img, FILE* fimg);
+
 void free_image(image_t* img);
+
 image_t* alloc_image(const unsigned rows, const unsigned cols);
 
 #endif
