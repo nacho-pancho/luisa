@@ -1,15 +1,16 @@
 /**
  * \file pbm.h
- * \brief Handling of Portable Bitmap files (PBM)
+ * \brief Basic Handling of Portable Bitmap files (PBM)
  */
 #ifndef PBM_H
 #define PBM_H
 
-#include "binmat.h"
+#include <stdio.h>
+
 /**
  * Codigos de error para biblioteca de entrada/salida imagenes
  */
-typedef enum error_code {
+enum  {
     PBM_OK=0,
     PBM_READ_ERROR=1,
     PBM_FILE_NOT_FOUND=2,
@@ -17,10 +18,19 @@ typedef enum error_code {
     PBM_INVALID_DATA=4,
     PBM_WRITE_ERROR=5,
     PBM_INVALID_FORMAT=6
-} ErrorCode;
+};
 
-ErrorCode read_pbm_header(FILE* fimg, idx_t& rows, idx_t& cols);
-ErrorCode read_pbm_data(FILE* fimg, binary_matrix& A);
-ErrorCode write_pbm(binary_matrix& A, FILE* fimg);
+typedef struct image { 
+    int nrows;
+    int ncols;
+    int npixels;
+    char* pixels;
+} image_t;
+
+int read_pbm_header(FILE* fimg, int* nrows, int *ncols );
+image_t* read_pbm_data(FILE* fimg, const int nrows, const int ncols);
+int write_pbm(const image_t* img, FILE* fimg);
+void free_image(image_t* img);
+image_t* alloc_image(const unsigned rows, const unsigned cols);
 
 #endif

@@ -1,9 +1,33 @@
 #include "pbm.h"
-#include <cstdio>
+#include <stdio.h>
+#include <malloc.h>
+#include <string.h>
 
-ErrorCode read_pbm_header(FILE* fimg, idx_t& rows, idx_t& cols) {
+//----------------------------------------------------------------------------
+
+void free_image(image_t* img) {
+    free(img->pixels);
+    free(img);
+}
+
+//----------------------------------------------------------------------------
+
+image_t* alloc_image(const unsigned nrows, const unsigned ncols) {
+    image_t* img = (image_t*) malloc(sizeof(image_t));
+    img->ncols = ncols;
+    img->nrows = nrows;
+    img->npixels = ncols*nrows;
+    img->pixels = (char*) malloc(img->npixels*sizeof(char));
+    return img;
+}
+
+//----------------------------------------------------------------------------
+
+int read_pbm_header(FILE* fimg, int* nrows, int *ncols ) {
+
     char magic;
-    int ancho,alto, aux = 0;
+    int aux = 0;
+
     magic = fgetc(fimg);
     /* 1. numero magico */
     if (magic != 'P')
@@ -11,56 +35,59 @@ ErrorCode read_pbm_header(FILE* fimg, idx_t& rows, idx_t& cols) {
     magic = fgetc(fimg);
     if (magic != '4')
         return PBM_INVALID_HEADER;
-    /* ancho */
-    aux = fscanf(fimg," %d",&ancho);
-    if ((ancho == 0) || (aux == 0))
+
+    /* ncols */
+        aux = fscanf(fimg," %d",ncols);
+    if ((ncols == 0) || (aux == 0))
         return PBM_INVALID_HEADER;
-    /* alto */
-    aux = fscanf(fimg," %d ",&alto);
-    if ((alto == 0) || (aux == 0))
+
+    /* nrows */
+    aux = fscanf(fimg," %d ",nrows);
+    if ((nrows == 0) || (aux == 0))
         return PBM_INVALID_HEADER;
-    rows = alto;
-    cols = ancho;
-    /* un espacio al final */
-    //aux = fgetc(fimg);
+
     return PBM_OK;
 }
 
-ErrorCode read_pbm_data(FILE* fimg, binary_matrix& A) {
-    register idx_t i,li;
-    A.clear();
-    const idx_t m = A.get_rows();
-    const idx_t n = A.get_cols();
-    for (i = 0, li=0; i < m; ++i) {
+//----------------------------------------------------------------------------
+image_t* read_pbm_data(FILE* fimg, const int nrows, const int ncols) {
+    int i,li;
+    image_t* img = alloc_image(nrows,ncols);
+
+    for (i = 0, li=0; i < nrows; ++i) {
         unsigned short mask = 0;
-        idx_t j;
-        short r = 0;
-        for (j = 0; j < n; ++j, ++li) {
+        int j;
+        int r = 0;
+        for (j = 0; j < ncols; ++j, ++li) {
             if (!mask) {
                 r = fgetc(fimg);
                 mask = 0x80;
-                if (r < 0) return PBM_INVALID_DATA;
+                if (r < 0) return NULL;
             }
-            A.set(i,j,(r & mask) != 0);
+            img->pixels[li] = (r & mask) != 0 ? 1 : 0;
             mask >>= 1;
         }
     }
-    if (li < n)
-        return PBM_INVALID_DATA;
+    if (li < img->npixels)
+        return NULL;
     else
-        return PBM_OK;
+        return img;
 }
 
-ErrorCode write_pbm(binary_matrix& A, FILE* fimg) {
-    fprintf(fimg,"P4\n%lu %lu\n",A.get_cols(),A.get_rows());
-    const idx_t ancho = A.get_cols();
-    const idx_t alto = A.get_rows();
-    register idx_t i,j;
-    for (i = 0; i < alto; ++i) {
+//----------------------------------------------------------------------------
+
+int write_pbm(const image_t* img, FILE* fimg) {
+    const int ncols = img->ncols;
+    const int nrows = img->nrows;
+    int i,j,li;
+
+    fprintf(fimg,"P4\n%d %d\n",ncols,nrows);
+
+    for (i = 0, li = 0; i < nrows; ++i) {
         unsigned short mask = 0x80;
         unsigned short word = 0x00;
-        for (j = 0; j < ancho; ++j) {
-            if (A.get(i,j)) {
+        for (j = 0; j < ncols; ++j, ++li) {
+            if (img->pixels[li]) {
                 word |= mask;
             }
             mask >>=1;
@@ -76,5 +103,6 @@ ErrorCode write_pbm(binary_matrix& A, FILE* fimg) {
     return PBM_OK;
 }
 
+//----------------------------------------------------------------------------
 
 

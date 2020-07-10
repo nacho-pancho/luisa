@@ -28,11 +28,13 @@ La siguiente es una lista de los proyectos disponibles al momento. Cada carpeta 
 * Para proyectos en C o C++ se recomienda usar herramientas de desarrollo de Unix tipo Make
 * En caso de C o C++ se debe verificar que no se produzcan pérdidas de memoria (por ejemplo usando valgrind)
 
-## Recomendaciones generales
+## Recomiendaciónes sobre  plataforma de desarrollo
 
 En última instancia, el software de LUISA será ejecutado en plataformas Linux. Es por eso que conviene trabajar en dicho
 entorno. En Macintosh es esencialmente lo mismo. Windows es el único que es significativamente distinto, pero tampoco es una
 limitante siempre que lo que se haga no dependa de particulares del sistema operativo.
+
+En todo caso, siempre se puede instalar una máquina virtual de Ubuntu sobre Windows, si eso resultara más cómodo.
 
 ## Recomendaciones para C/C++
 
@@ -64,4 +66,24 @@ web (más allá del estilo) está hecho en Python también. Las bibliotecas rele
 * [pillow](https://python-pillow.org/) Paquete de procesamiento de imágenes de alto nivel. Se integra muy bien con numpy.
 * [matplotlib](https://matplotlib.org/) Biblioteca estandar de facto para generar gráficas y ploteos en Python.
 
+
+# Recomendaciones sobre desarrollo para alta performance
+
+La velocidad es muy importante en algunas tareas de LUISA. Procesar millones de imágenes de decenas de megapixels cada una
+puede llevar mucho tiempo.
+
+Sin embargo, como todo, conviene siempre ir de a poco. Si nunca se usó CUDA por ejemplo, es muy mala idea comenzar desarrollando
+un método cualquiera directamente en CUDA. Lo ideal es comenzar con una implementación fácil pero funcional, y luego avanzar
+hacia cosas cáda vez más sofisticadas.
+El orden a seguir es el siguiente:
+
+* Si se domina cualquier lenguaje interpretado tipo Python o R, tener una primera implementación funcionando en ellos.
+* Implementar el algoritmo en C/C++ sin utilizar ningún tipo de aceleración de hardware
+* Incorporar funciones de instrucciones múltiples de los procesadores modernos ([SIMD](https://en.wikipedia.org/wiki/SIMD)). Esto puede acelerar _dramáticamente_ la velocidad de un programa sin siquiera utilizar más de un CPU. Todos los compiladores modernos tienen soporte para SMIDs, por ejemplo [GCC](https://gcc.gnu.org/onlinedocs/gcc/Vector-Extensions.html)
+* Incorporar manejo de múltiples CPUs; a esta altura todas las computadoras tienen al menos 4. Para esto existe la biblioteca estándar [OpenMP](https://www.openmp.org/). Es muy fácil de usar y ya viene incluída en todos los compiladores (GCC, Visual C++, etc.)
+* Sólo si lo amerita, hacer una implementación con GPUs. Hay que tener en cuenta que para aprovechar estas funciones es necesario tener una buena GPU, y es considerablemente menos portable el código que incluya esta tecnología, así que este paso habría que considerarlo bien.
+* *siempre*, *siempre*, verificar que todas las versiones que se tenga den *exactamente* igual. No alcanza con *parecido*.
+
+
+ 
 
