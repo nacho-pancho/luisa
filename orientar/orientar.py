@@ -373,68 +373,6 @@ def local_angle_search(work_img, min_angle, max_angle, delta_angle, debug_prefix
 
 #---------------------------------------------------------------------------------------
 
-def select_analysis_zone(orig_img,debug_prefix):
-    '''
-    Chooses a suitable, square region for performing the alignement and orientation
-    analyses of the image. This is done for two purposes:
-    
-    - to speed up the search, since the whole image is 18MPix; here we choose a 1MP square
-    - to avoid the influence of borders, marks, or other irrelevant features of the image;
-    
-    We seek for a square region, among 3 candidates (center top, center center and center bottom), 
-    which is more 'interesting' by looking at the average intensity of the pixels. 
-    
-    A block with more text will have an average intensity close to 1/2. Parts which have no 
-    text will usually be much
-    closer to 0. Some strange parts may be all black and be too close to 1.
-    '''
-    w,h = orig_img.size
-    d = min(w,h)
-    MARGIN=600
-    if w < h:
-        R = int(np.floor(w/4))      # size of outer rectangle
-    else:
-        R = int(np.floor(h/4))      # size of outer rectangle
-    orig_mat = np.asarray(orig_img)
-    scores = list()
-    boxes  = list()
-    #
-    # probamos qué cuadrado de WIN_SIZExWIN_SIZE
-    # es el mas adecuado para analizar la alineacion
-    #
-    for i in (1,2,3):
-        x0 = int(np.floor(w/2)) - R
-        x1 = int(np.floor(w/2)) + R
-        y0 = int(np.floor(i*h/4)) - R
-        y1 = int(np.floor(i*h/4)) + R
-        p = np.mean(orig_mat[y0:y1,x0:x1])
-        box = (x0,y0,x1,y1)
-        # the actual score is p * (1 - p)
-        # this value is higher when p is close to 1/2 
-        # and lower when p is close to 1 or 0
-        #
-        scores.append(p*(1-p)) 
-        boxes.append(box)
-
-    best_idx = np.argmax(scores)
-    print("scores",scores)
-    print("best zone ",best_idx,":",boxes[best_idx])
-    #
-    # Additional information.
-    # If the top block is significantly darker than
-    # the others, it is a good additional indication 
-    # that the ORIENTATION of the document os PORTRAIT.
-    # This is used as a hint on the orientation detection
-    # algorithm.
-    #
-    if scores[0] > 3*max(scores[1],scores[2]):
-        hint = True
-    else:
-        hint = False
-    return (boxes[best_idx], hint)
-
-#---------------------------------------------------------------------------------------
-
 def align_image(orig_img, debug_prefix):
     '''
     Main alignement (and orientation) function.
@@ -446,7 +384,7 @@ def align_image(orig_img, debug_prefix):
     #
     # choose a good zone for further analysis
     #
-    box, hint = select_analysis_zone(orig_img,debug_prefix)
+    box, hint = (700,700,w-700,h-700)
     img = orig_img.crop(box)
     imwrite(debug_prefix + "_cropped.tif",img)
     #

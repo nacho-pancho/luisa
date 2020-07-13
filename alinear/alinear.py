@@ -238,57 +238,6 @@ def local_angle_search(work_img, min_angle, max_angle, delta_angle, debug_prefix
     else:
         return best_angle,best_score
 
-#---------------------------------------------------------------------------------------
-
-def select_analysis_zone(orig_img,debug_prefix):
-    '''
-    Chooses a suitable, square region for performing the alignement and orientation
-    analyses of the image. This is done for two purposes:
-    
-    - to speed up the search, since the whole image is 18MPix; here we choose a 1MP square
-    - to avoid the influence of borders, marks, or other irrelevant features of the image;
-    
-    We seek for a square region, among 2 candidates (center top and center center), 
-    which is more 'interesting' by looking at the average intensity of the pixels. 
-    
-    A block with more text will have an average intensity close to 1/2. Parts which have no 
-    text will usually be much
-    closer to 0. Some strange parts may be all black and be too close to 1.
-    '''
-    w,h = orig_img.size
-    d = min(w,h)
-    MARGIN=600
-    if w < h:
-        R = int(np.floor(w/4))      # size of outer rectangle
-    else:
-        R = int(np.floor(h/4))      # size of outer rectangle
-    orig_mat = np.asarray(orig_img)
-    scores = list()
-    boxes  = list()
-    #
-    # probamos qué cuadrado de WIN_SIZExWIN_SIZE
-    # es el mas adecuado para analizar la alineacion
-    #
-    for i in (1,2):
-        x0 = int(np.floor(w/2)) - R
-        x1 = int(np.floor(w/2)) + R
-        y0 = int(np.floor(i*h/4)) - R
-        y1 = int(np.floor(i*h/4)) + R
-        p = np.mean(orig_mat[y0:y1,x0:x1])
-        box = (x0,y0,x1,y1)
-        # the actual score is p * (1 - p)
-        # this value is higher when p is close to 1/2 
-        # and lower when p is close to 1 or 0
-        #
-        scores.append(p*(1-p)) 
-        boxes.append(box)
-
-    best_idx = np.argmax(scores)
-    print("scores",scores)
-    print("best zone ",best_idx,":",boxes[best_idx])
-    return boxes[best_idx]
-
-#---------------------------------------------------------------------------------------
 
 def align_image(orig_img, debug_prefix):
     '''
@@ -301,7 +250,7 @@ def align_image(orig_img, debug_prefix):
     #
     # choose a good zone for further analysis
     #
-    box = select_analysis_zone(orig_img,debug_prefix)
+    box = (700,700,w-700,h-700)
     img = orig_img.crop(box)
     imwrite(debug_prefix + "_cropped.tif",img)
     #
@@ -313,7 +262,7 @@ def align_image(orig_img, debug_prefix):
     #
     # that's it
     #
-    return imrot(orig_img,best_angle)
+    return imrot(orig_img,best_angle),best_angle
     
 #---------------------------------------------------------------------------------------
 
@@ -337,11 +286,12 @@ if __name__ == '__main__':
     prefix = args["prefix"]
     outdir = args["outdir"]
     list_file = args["list"]
-
     with open(list_file) as fl:
         errors = list()
         nimage = 0
         t0 = time.time()
+        angles_fname = os.path.join(outdir,'angles.csv')
+        angles_file = open(angles_fname,mode="w")
         for relfname in fl:
             #
             # next image
@@ -374,7 +324,7 @@ if __name__ == '__main__':
             #
             if os.path.exists(aligned_name):
                 print("(cached).")
-                continue
+                continue            
             #
             # read image
             #
@@ -389,7 +339,8 @@ if __name__ == '__main__':
             #
             # perform actual processing (alignement)
             #
-            Ialign = align_image(Iorig,os.path.join(debugdir,"alinear"))
+            Ialign, angle = align_image(Iorig,os.path.join(debugdir,"alinear"))
+            print(f'{relfname},{angle}', file=angles_file)
             #
             # write result
             #
@@ -397,6 +348,7 @@ if __name__ == '__main__':
             #
             # end of main loop over images
             #
+        angles_file.close()
         #
         # print some performance stats
         #
