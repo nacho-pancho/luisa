@@ -4,6 +4,7 @@ recortar ................... recorte de bloques de texto
 clasificar_maquina ......... clasificación de máquina de escribir *
 clasificar_tipo ............ clasificación de tipo de documento   *
 detectar_sello ............. detección de sellos                  *
+ocr ........................ optical character recognition        *
 web_mobil .................. interfaz mobil de LUISA (web/app)
 comun ...................... material común a todos los proyectos 
 contrib .................... bibliotecas
