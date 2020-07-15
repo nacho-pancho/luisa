@@ -12,7 +12,6 @@ from PIL import Image,ImageOps,ImageChops,ImageDraw
 import scipy.ndimage as skimage
 import matplotlib.pyplot as plt
 import os
-import config
 import scipy.signal as dsp
 import time
 import argparse
@@ -33,26 +32,22 @@ WIN_SIZE = 1024
 #---------------------------------------------------------------------------------------
 
 def imwrite(fname,img):
-    img.save(fname,compression=config.COMP)
+    #img.save(fname,compression=COMP)
+    img.save(fname)
 
 #---------------------------------------------------------------------------------------
 
 def imrot(img,angle):
     w,h = img.size
-    #center = (int(w/2),int(h/2))
     return img.rotate(angle, resample=Image.NEAREST,expand=True,fillcolor=1)
 
 #---------------------------------------------------------------------------------------
 
 def imread(fname):
     img = Image.open(fname)
-    if not 274 in img.tag_v2:
-        return img
-    if img.tag_v2[274] == 8: # regression bug in PILLOW for TIFF images
-        img = imrot(img,-90)
     return img
 
-
+#---------------------------------------------------------------------------------------
     
 def detect_bands(rmt):
     dif = np.int8(rmt[1:]) - np.int8(rmt[:-1])
@@ -77,7 +72,6 @@ def detect_bands(rmt):
 #---------------------------------------------------------------------------------------
 
 if __name__ == '__main__':
-
     #
     # command line arguments
     #
@@ -86,24 +80,23 @@ if __name__ == '__main__':
 		    help="path prefix  where to find prealigned files")
     ap.add_argument("-o","--outdir", type=str, default="../results",
 		    help="where to store results")
-    ap.add_argument("-l","--list", type=str, default="../data/testa.list",
+    ap.add_argument("-l","--list", type=str, default="../datos/r0566a.list",
 		    help="text file where input pre-aligned files are specified")
     #
     # INICIALIZACION
     #
-    args = vars(ap.parse_args())
+    args      = vars(ap.parse_args())
     print(args)
-    prefix = args["prefix"]
-    outdir = args["outdir"]
+    prefix    = args["prefix"]
+    outdir    = args["outdir"]
     list_file = args["list"]
-
     #
     # crear estructuras de directorios
     #
     with open(list_file) as fl:
-        # #
-        # # inicializacion de memoria
-        # #
+        #
+        # inicializacion de memoria
+        #
         errors = list()
         nimage = 0
         t0 = time.time()
@@ -117,15 +110,15 @@ if __name__ == '__main__':
             #
             # nombres de archivos de entrada y salida
             #
-            relfname = relfname.rstrip('\n')
+            relfname     = relfname.rstrip('\n')
             reldir,fname = os.path.split(relfname)
-            fbase,fext = os.path.splitext(fname)
-            foutdir = os.path.join(outdir,reldir)
-            debugdir = os.path.join(foutdir,fbase + "_debug")
+            fbase,fext   = os.path.splitext(fname)
+            foutdir      = os.path.join(outdir,reldir)
+            debugdir     = os.path.join(foutdir,fbase + "_debug")
             
             fimgbands  = os.path.join(debugdir,fbase + '_bands.png')
             fimgblocks = os.path.join(debugdir,fbase + '_blocks.png')
-            fcsvblocks = os.path.join(debugdir,fbase + '.blocks')
+            fcsvblocks = os.path.join(foutdir,fbase + '.blocks')
             
             print(f'#{nimage} relfname={relfname} outdir={outdir} fname={fname} fbase={fbase}')
             #
@@ -138,24 +131,28 @@ if __name__ == '__main__':
             if os.path.exists(fcsvblocks):
                 print('CACHED.')
                 continue
-            Iorig = imread(os.path.join(prefix,relfname))
+
+            img = imread(os.path.join(prefix,relfname))
+            I = 1 - np.array(img)
             if not os.path.exists(debugdir):
                 os.system(f'mkdir -p \'{debugdir}\'')
             #
             # detectamos bandas horizontales
             #
-            radius = 40
+            radius  = 40
             row_sum = np.sum(I,axis=1)
-            order = int((radius*2+1)/3) # 30%
-            domain = np.arange(-radius,radius+1)
-            row_sum_filtered =  dsp.order_filter(row_sum,domain,order) 
+            order   = int((radius*2+1)/3)
+            domain  = np.arange(-radius,radius+1)
+            row_sum_filtered    =  dsp.order_filter(row_sum,domain,order) 
             row_sum_thresholded = (row_sum > ROW_ABS_THRES) & ((row_sum - row_sum_filtered) > ROW_REL_THRES) #
+
             plt.close('all')
             plt.figure(1)
             plt.plot(row_sum,lw=0.5)
             plt.plot(row_sum_filtered,lw=0.5)
             plt.plot(100*row_sum_thresholded,lw=0.5)
             plt.legend(('sum','filt','thres'))
+
             if debugdir is not None:
                 png_file = os.path.join(debugdir,"profile_h.png")
                 plt.savefig(png_file,dpi=300)
@@ -178,15 +175,14 @@ if __name__ == '__main__':
             # y se recorta en donde dicha intensidad está por debajo de cierto umbral
             # (cero en este caso) y tiene un ancho suficientemente grande (más de 2 pixeles)
             #
-            #
             # aqui se detectan los bloques en cada banda en base a las 
             # intensidades de las  columnas de pixeles
             #
-            block_map = Image.fromarray(128*(1-I.astype(np.uint8)),mode='L')
-            canvas = ImageDraw.Draw(block_map)
-            fhblocks = open(fcsvblocks,'w')
-            blocks = list()
-            band_idx = 0
+            block_map = img.convert(mode='L')
+            canvas    = ImageDraw.Draw(block_map)
+            fhblocks  = open(fcsvblocks,'w')
+            blocks    = list()
+            band_idx  = 0
             for b in bands:
                 w = b[1]-b[0]
                 band = I[b[0]:b[1], :]
@@ -197,9 +193,8 @@ if __name__ == '__main__':
                 # filtro de mediana para evitar separaciones entre palabras
                 #
                 col_sum_thresholded = dsp.medfilt(col_sum_thresholded, kernel_size=2*MIN_WORD_SEP+1)
-                col_blocks = detect_bands(col_sum_thresholded)
-                #print('band ',b,'blocks:',col_blocks)
-                block_idx = 0
+                col_blocks          = detect_bands(col_sum_thresholded)
+                block_idx           = 0
                 for block in col_blocks:
                     box = (band_idx,block_idx,b[0],block[0],b[1],block[1])
                     #
@@ -218,13 +213,14 @@ if __name__ == '__main__':
             fhblocks.close()
             block_file = os.path.join(debugdir,"block_map.png")
             block_map.save(block_file)
-            #print('(OK)')
             #
             # fin loop principal
             #
+
         if nimage > 0:
             meandt = time.time() / nimage
             print(f'Average time per image: {meandt} seconds. ')
+
         nerr = len(errors)
         if nerr > 0:
             print(f'ERROR AL PROCESAR {nerr} ARCHIVOS:')
