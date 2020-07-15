@@ -11,6 +11,7 @@ import numpy as np
 from PIL import Image,ImageOps,ImageChops,ImageDraw
 import scipy.ndimage as skimage
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 import os
 import scipy.signal as dsp
 import time
@@ -178,8 +179,7 @@ if __name__ == '__main__':
             # aqui se detectan los bloques en cada banda en base a las 
             # intensidades de las  columnas de pixeles
             #
-            block_map = img.convert(mode='L')
-            canvas    = ImageDraw.Draw(block_map)
+            block_map = (1-np.copy(I)).astype(float)
             fhblocks  = open(fcsvblocks,'w')
             blocks    = list()
             band_idx  = 0
@@ -206,13 +206,13 @@ if __name__ == '__main__':
                         # mismo formato que modulo C : i0, j0, i1, j1, i0 orig, j0 orig, i1 orig, j0 orig, row idx, block idx
                         print(b[0], block[0], b[1], block[1], 4*b[0], 4*block[0], 4*b[1], 4*block[1], band_idx, block_idx, file=fhblocks)
                         blocks.append(box)
-                        canvas.rectangle((block[0],b[0],block[1],b[1]),fill=(200))
+                        block_map[b[0]:b[1],block[0]:block[1]] = block_map[b[0]:b[1],block[0]:block[1]] * 0.75
                     block_idx = block_idx + 1
                 band_idx = band_idx +1
             
             fhblocks.close()
             block_file = os.path.join(debugdir,"block_map.png")
-            block_map.save(block_file)
+            plt.imsave(block_file,(255*block_map).astype(np.uint8),cmap=cm.gray)
             #
             # fin loop principal
             #
