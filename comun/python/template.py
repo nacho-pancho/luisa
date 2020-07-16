@@ -85,7 +85,7 @@ if __name__ == '__main__':
             # creamos carpetas de destino si no existen
             #
             if not os.path.exists(foutdir):
-                os.system(f'mkdir -p \'{foutdir}\'')
+                os.makedirs(foutdir)
 
             output_fname = os.path.join(foutdir,fname)
             input_fname = os.path.join(prefix,relfname)

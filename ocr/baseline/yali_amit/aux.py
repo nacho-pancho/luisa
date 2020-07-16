@@ -63,10 +63,6 @@ def create_image(trin, TT, x_dim, ex_file):
         imlist[0].save("_Images/test.tif", compression="tiff_deflate", save_all=True,
                        append_images=imlist[1:])
 
-        #if not os.path.isfile('_Images'):
-        #    os.system('mkdir _Images')
-        #imsave('_Images/' + ex_file + '.png', img)
-
         print("Saved the sampled images")
 
 

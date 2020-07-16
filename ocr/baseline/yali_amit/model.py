@@ -290,7 +290,7 @@ aux.create_image(test_data,tt,model.x_dim,'try')
 # Store the trained model.
 ex_file=args.model
 if not os.path.isfile('_output'):
-    os.system('mkdir _output')
+    os.makedirs('_output')
 torch.save(model.state_dict(),'_output/'+ex_file+'.pt')
 fout.write("DONE\n")
 fout.flush()

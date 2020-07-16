@@ -313,7 +313,7 @@ if __name__ == '__main__':
             #
             fpath = fname[:(fname.find('/')+1)]
             if not os.path.exists(foutdir):
-                os.system(f'mkdir -p \'{foutdir}\'')
+                os.makedirs(foutdir)
             #
             # aligned image name
             #
@@ -333,7 +333,7 @@ if __name__ == '__main__':
             # create output directory for debugging, if required
             #            
             if not os.path.exists(debugdir):
-                os.system(f'mkdir -p \'{debugdir}\'')
+                os.makedirs(debugdir)
             copy_name = os.path.join(debugdir, 'orig' + EXT)
             imwrite(copy_name,Iorig)
             #
