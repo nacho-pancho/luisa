@@ -353,7 +353,7 @@ if __name__ == '__main__':
         # print some performance stats
         #
         if nimage > 0:
-            meandt = time.time() / nimage
+            meandt = (time.time()-t0) / nimage
             print(f'Average time per image: {meandt} seconds. ')
         nerr = len(errors)
         if nerr > 0:

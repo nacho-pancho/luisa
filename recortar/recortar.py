@@ -24,6 +24,7 @@ import functools # functional programming tools
 ROW_ABS_THRES = 20    # 
 ROW_REL_THRES = 4     # 4 more pixels than local baseline
 COL_ABS_THRES = 1     # column has at least three pixels black
+COL_REL_THRES = 0.1   # the intensity of the column is less than 20% of the maximum
 MIN_WORD_SEP = 20     # minimum separation between two words
 BLOCK_ABS_THRES = 4   # minimum number of pixels in a valid block
 TRAZO=1.0
@@ -59,19 +60,21 @@ def detect_bands(rmt, min_size):
     dif = np.int8(rmt[1:]) - np.int8(rmt[:-1])
     upidx = np.flatnonzero(dif > 0) + 1
     dnidx = np.flatnonzero(dif < 0) + 1 
-    if len(upidx) < 2:
+    if len(upidx) == 0:
+        print('not enough up flanks')
         return list()
     
-    if len(dnidx) < 2:
+    if len(dnidx) == 0:
+        print('not enough down flanks')
         return list()
     
-    if dnidx[0] < upidx[0]: # lo primero que ocurre es flanco de bajada
+    if (len(dnidx) > 1) & (dnidx[0] < upidx[0]): # lo primero que ocurre es flanco de bajada
         dnidx = dnidx[1:]
-    if len(upidx) > len(dnidx):
+
+    if (len(upidx) > 1) & (len(upidx) > len(dnidx)):
         upidx = upidx[:-1]
         
     bands = list(zip(upidx,dnidx))
-    #bands = list( filter( lambda x: x[1]-x[0] > min_size, bands ) )
     return bands
 
 
@@ -83,7 +86,6 @@ def detect_rows(img,debugfile):
     radius  = 100
     domain  = np.arange(-radius,radius+1)
     order   = int((radius*2+1)/3)
-
     row_sum = np.sum(I,axis=1)
     row_sum_filtered    =  dsp.order_filter(row_sum,domain,order) 
     row_sum_thresholded = (row_sum > ROW_ABS_THRES) & ((row_sum - row_sum_filtered) > ROW_REL_THRES) #
@@ -94,12 +96,12 @@ def detect_rows(img,debugfile):
         plt.close('all')
         fig = plt.figure(figsize=(16,10))
         plt.subplot(211)
-        plt.plot(row_sum,lw=0.5)
-        plt.plot(row_sum_filtered,lw=0.5)
-        plt.plot(100*row_sum_thresholded,lw=1)
+        plt.plot(row_sum*(100/I.shape[1]),lw=0.5)
+        plt.plot(row_sum_filtered*(100/I.shape[1]),lw=0.5)
+        plt.plot(1*row_sum_thresholded,lw=1)
         plt.legend(('sum','filt','thres'))
         for b in row_list:
-            plt.plot(b,(300,300),lw=1,color='black')
+            plt.plot(b,(100,100),lw=1,color='black')
         plt.grid(True)
         plt.subplot(212)
         plt.bar(h,hc)
@@ -108,52 +110,147 @@ def detect_rows(img,debugfile):
 
 #---------------------------------------------------------------------------------------
 
-def detect_blocks(img,band_list,debugfile):
+def label_row(img,row_info):
+    w,h = img.shape
+    y0,y1 = row_info
+    x0,x1 = 0,w
+    w = x1 - x0
+    h = y1 - y0
+    if h < 10: # absolute height in pixels
+        return 'flat'
+
+    aspect = w / h
+    row_img = img[y0:y1,x0:x1]
+    #
+    # trim row
+    #
+    ver_profile = np.sum(row_img,axis=1)
+    nz          = np.flatnonzero(ver_profile)
+    top, bottom = nz[0], nz[-1]
+
+    hor_profile   = np.sum(row_img,axis=0)
+    nz            = np.flatnonzero(hor_profile)
+    left, right   = nz[0], nz[-1]
+    trimmed_row   = row_img[top:bottom,left:right] 
+    tw, th  = (right-left), (bottom-top)
+    tsize   = tw * th
+    if th == 0: # absolute height in pixels (smallest letter height ~ 20 pixels) 
+        return 'flat'
+
+    taspect = tw / th
+    tsum = np.sum(trimmed_row)
+
+    if th > 90: # absolute height in pixels is more than twice the typical character height
+        return 'tall'
+    if th < 20: # absolute height in pixels (smallest letter height ~ 20 pixels) 
+        return 'flat'
+    if tsum > 0.7*tsize: # too dark
+        return 'dark'
+    if tsum < 0.025*tsize: # too empty
+        return 'empty'
+    else:
+        return 'good'
+
+#---------------------------------------------------------------------------------------
+
+def refine_rows(img,row_list):
+    #
+    # 1. marcamos filas inútiles
+    #
+    row_labels = [label_row(img,bi) for bi in row_list]
+    lab,freq = np.unique(row_labels,return_counts=True)
+    for i in range(len(lab)):
+        print(lab[i],freq[i])
+    
+    R = zip(row_list,row_labels)
+    refined_row_list = [t[0] for t in R if t[1] != 'flat'] 
+
+    return refined_row_list,row_labels # for now, only this
+
+#---------------------------------------------------------------------------------------
+
+def create_row_map(img,row_list,row_labels = None): 
+
+    row_map = np.ones((img.shape[0],img.shape[1],3))
+    row_map[:, :, 0 ] = (1-img).astype(float)
+    row_map[:, :, 1 ] = row_map[:,:,0 ]
+    row_map[:, :, 2 ] = row_map[:,:,0 ]
+    w,h = img.shape
+    for i in range(len(row_list)):
+        info = row_list[i]
+        y0,y1 = info[:2]
+        x1 = w
+        x0 = 0
+        w,h = (x1-x0),(y1-y0)
+        # for use with colormap 'RdYlGn' (red - yellow - green)
+        cmap = cm.get_cmap('hsv')
+        if row_labels is None:
+            label = 'good'
+        else:
+            label = row_labels[i]
+        if label == 'good':
+            c = cmap(0.50)
+        elif label == 'flat':
+            c = cmap(0.10) 
+        elif label == 'tall':
+            c = cmap(0.30)
+        elif label == 'empty':
+            c = cmap(1.00)
+        elif label == 'dark':
+            c = cmap(0.80)
+        else:
+            print('Unkown label',label)
+        row = row_map[y0:y1,x0:x1]
+        bred   = row[:,:,0]
+        bgreen = row[:,:,1]
+        bblue  = row[:,:,2]
+        bred[bred == 1] = c[0] 
+        bgreen[bgreen == 1] = c[1] 
+        bblue[bblue == 1] = c[2] 
+        row_map[y0:y1,x0:x1,0] = bred
+        row_map[y0:y1,x0:x1,1] = bgreen
+        row_map[y0:y1,x0:x1,2] = bblue
+
+    return row_map
+
+#---------------------------------------------------------------------------------------
+
+
+def detect_blocks(img,row_list,debugfile):
     # parameters of order filter
     radius  = 100
     domain  = np.arange(-radius,radius+1)
     order   = int((radius*2+1)/3)
     #
-    # cada banda es luego cortada en bloques
-    # para esto mide la intensidad promedio de cada columna en la banda
+    # cada rowa es luego cortada en bloques
+    # para esto mide la intensidad promedio de cada columna en la rowa
     # y se recorta en donde dicha intensidad está por debajo de cierto umbral
     # (cero en este caso) y tiene un ancho suficientemente grande (más de 2 pixeles)
     #
-    # aqui se detectan los bloques en cada banda en base a las 
+    # aqui se detectan los bloques en cada rowa en base a las 
     # intensidades de las  columnas de pixeles
     #
     block_list = list()
-    band_idx   = 0
+    row_idx   = 0
     #
-    # altura de las bandas
+    # altura de las rowas
     #
-    for band in band_list:
-        y0 = band[0]
-        y1 = band[1]
-        band = I[y0:y1, :]
-        col_sum = np.sum(band,axis=0)
+    for row in row_list:
+        y0 = row[0]
+        y1 = row[1]
+        Irow = I[y0:y1, :]
+        col_sum = np.sum(Irow,axis=0)
         #
-        col_sum_thresholded = col_sum >= COL_ABS_THRES
+        #col_sum_thresholded = (col_sum >= COL_ABS_THRES) * (col_sum >= COL_REL_THRES*np.max(col_sum))
+        col_sum_thresholded = (col_sum >= COL_ABS_THRES) 
         #
         # filtro de mediana para evitar separaciones entre palabras
         #
         col_sum_thresholded = dsp.medfilt(col_sum_thresholded, kernel_size=2*MIN_WORD_SEP+1)
-        col_blocks          = detect_bands(col_sum_thresholded, MIN_WORD_SEP)
-        block_idx           = 0
-        for block in col_blocks:
-            x0 = block[ 0 ]
-            x1 = block[ 1 ]
-            block_info = (band_idx,block_idx,y0,x0,y1,x1)
-            #
-            # filtramos bloques demasiado vacios y demasiado lleno
-            #
-            Ib = I[y0:y1,x0:x1]
-            bsum = np.sum(Ib)
-            if  (bsum >= BLOCK_ABS_THRES) & (bsum < Ib.size - BLOCK_ABS_THRES):
-                # mismo formato que modulo C : i0, j0, i1, j1, i0 orig, j0 orig, i1 orig, j0 orig, row idx, block idx
-                block_list.append(block_info)
-            block_idx = block_idx + 1
-        band_idx = band_idx +1
+        row_blocks          = detect_bands(col_sum_thresholded, MIN_WORD_SEP)
+        row_block_list = [(y0,x0,y1,x1) for (x0,x1) in row_blocks] 
+        if len(row_block_list) > 0:
+            block_list.append(row_block_list) # all row blocks in their own list
     #    
     # devolver resultado refinado
     #
@@ -163,7 +260,7 @@ def detect_blocks(img,band_list,debugfile):
 
 
 def label_block(img,block_info):
-    y0,x0,y1,x1 = block_info[2:]
+    y0,x0,y1,x1 = block_info
     w = x1 - x0
     h = y1 - y0
     aspect = w / h
@@ -173,33 +270,51 @@ def label_block(img,block_info):
     #
     ver_profile = np.sum(block_img,axis=1)
     nz = np.flatnonzero(ver_profile)
+    if len(nz) < 2:
+        return 'flat'
     top, bottom = nz[0], nz[-1]
 
     hor_profile = np.sum(block_img,axis=0)
     nz = np.flatnonzero(hor_profile)
+    if len(nz) < 2:
+        return 'small'
     left, right = nz[0], nz[-1]
     trimmed_block = block_img[top:bottom,left:right] 
     tw, th  = (right-left), (bottom-top)
     tsize   = tw * th
     taspect = tw / th
+    tsum = np.sum(trimmed_block) 
+
     if th < h/4: # relative height w.r.t. non trimmed block
         return 'flat'
-    if th < 20: # absolute height in pixels (smallest letter height ~ 20 pixels) 
+    elif th < 20: # absolute height in pixels (smallest letter height ~ 20 pixels) 
         return 'flat'
-    if tsize < 400: # 20x20 pixels is really small 
+    elif tsize < 400: # 20x20 pixels is really small 
         return 'small'
-    #
-    # aspect ratio too large: this could be due to a long underlined sentence
-    #
-    if taspect > 25: # too long for a single word
+    elif taspect > 20: # too long for a single word
         return 'long'
-    if np.sum(trimmed_block) > 0.9*tsize: # too dark
+    elif (tsum > 0.9*tsize) or (tsum > (tsize - BLOCK_ABS_THRES)): # too dark
         return 'dark'
-    return 'good'
+    elif  tsum < BLOCK_ABS_THRES:
+        return 'empty'
+    else:
+        return 'good'
 
 #---------------------------------------------------------------------------------------
 
-def refine_blocks(img,block_list,debugdir):
+def break_long_block(img,block_info):
+    '''
+    Cuando un bloque es sospechosamente largo, hay básicamente dos posibilidades:
+    - que sea texto subrayado, lo que no permite cortarlo 
+    - que la separación entre palabras sea muy pequeña
+    '''
+    smaller_blocks = list()
+    
+    return smaller_blocks
+
+#---------------------------------------------------------------------------------------
+
+def refine_blocks(img,block_list):
     '''
     El método primario  de recortar bloques es muy sencillo y rápido,
     pero no es capaz de discernir si cada bloque es en sí relevante.
@@ -220,16 +335,42 @@ def refine_blocks(img,block_list,debugdir):
     #
     # 1. marcamos bloques inútiles: vacíos, basura, o sólo con puntuación 
     #
-    block_labels = [label_block(img,bi) for bi in block_list]
-    lab,freq = np.unique(block_labels,return_counts=True)
-    for i in range(len(lab)):
-        print(lab[i],freq[i])
-
-    return block_list,block_labels # for now, only this
+    refined_block_list = list()
+    #
+    # this list corresponds to the INPUT blocks, not the refined blocks
+    # it is kept mostly for debugging to see why any given block was discarded
+    #
+    block_labels = list() 
+    for row_block_list in block_list:
+        refined_row_block_list = list()
+        row_block_labels = list()
+        for block_info in row_block_list:
+            label = label_block(img,block_info)
+            row_block_labels.append(label)
+            if label == 'good':
+                refined_row_block_list.append(block_info)
+            elif label == 'long':
+                # break long block into smaller ones
+                # PENDING!  we ignore this for now!!
+                smaller_blocks = break_long_block(img,block_info)
+                if len(smaller_blocks) == 1:
+                    refined_row_block_list.append(smaller_blocks[0])
+                else:
+                    refined_row_block_list.extend(smaller_blocks)
+                # PENDING!
+            else:
+                # bad block, skip
+                continue
+        # only add row if non-empty
+        block_labels.append(row_block_labels)
+        if len(refined_row_block_list) > 0:
+            refined_block_list.append(refined_row_block_list)
+     
+    return refined_block_list,block_labels 
 
 #---------------------------------------------------------------------------------------
 
-def create_block_map(img,block_list,block_labels):
+def create_block_map(img,block_list,block_labels = None):
 
     block_map = np.ones((img.shape[0],img.shape[1],3))
     block_map[:, :, 0 ] = (1-img).astype(float)
@@ -237,34 +378,42 @@ def create_block_map(img,block_list,block_labels):
     block_map[:, :, 2 ] = block_map[:,:,0 ]
 
     for i in range(len(block_list)):
-        info = block_list[i]
-        label = block_labels[i]
-        y0,x0,y1,x1 = info[2:]
-        w,h = (x1-x0),(y1-y0)
-        # for use with colormap 'RdYlGn' (red - yellow - green)
-        cmap = cm.get_cmap('hsv')
-        if label == 'good':
-            c = cmap(0.50)
-        elif label == 'long':
-            c = cmap(0.40) 
-        elif label == 'flat':
-            c = cmap(0.20) 
-        elif label == 'small':
-            c = cmap(0.10)
-        elif label == 'dark':
-            c = cmap(0)
-        else:
-            print('Unkown label',label)
-        block = block_map[y0:y1,x0:x1]
-        bred   = block[:,:,0]
-        bgreen = block[:,:,1]
-        bblue  = block[:,:,2]
-        bred[bred == 1] = c[0] 
-        bgreen[bgreen == 1] = c[1] 
-        bblue[bblue == 1] = c[2] 
-        block_map[y0:y1,x0:x1,0] = bred
-        block_map[y0:y1,x0:x1,1] = bgreen
-        block_map[y0:y1,x0:x1,2] = bblue
+        row_block_list = block_list[i]
+        row_block_labels = None
+        if block_labels is not None:
+            row_block_labels = block_labels[i]
+        for j in range(len(row_block_list)):
+            info = row_block_list[j]
+            if row_block_labels is not None:
+                label = row_block_labels[j]
+            else:
+                label = 'good'
+            y0,x0,y1,x1 = info
+            w,h = (x1-x0),(y1-y0)
+            # for use with colormap 'RdYlGn' (red - yellow - green)
+            cmap = cm.get_cmap('hsv')
+            if label == 'good':
+                c = cmap(0.50)
+            elif label == 'long':
+                c = cmap(0.20) 
+            elif label == 'flat':
+                c = cmap(0.10) 
+            elif label == 'small':
+                c = cmap(0.00)
+            elif label == 'dark':
+                c = cmap(0.80)
+            else:
+                print('Unkown label',label)
+            block = block_map[y0:y1,x0:x1]
+            bred   = block[:,:,0]
+            bgreen = block[:,:,1]
+            bblue  = block[:,:,2]
+            bred[bred == 1] = c[0] 
+            bgreen[bgreen == 1] = c[1] 
+            bblue[bblue == 1] = c[2] 
+            block_map[y0:y1,x0:x1,0] = bred
+            block_map[y0:y1,x0:x1,1] = bgreen
+            block_map[y0:y1,x0:x1,2] = bblue
 
     return block_map
 
@@ -341,38 +490,52 @@ if __name__ == '__main__':
             if not os.path.exists(debugdir):
                 os.makedirs(debugdir)
             #
-            # deteccion de bandas (renglones)
+            # deteccion de bandas primaria
             #
             debugfile = os.path.join(foutdir,fbase + '_debug_rows.png')
-            row_list = detect_rows(img,debugfile)
-            #  
+            row_list = detect_rows(I,debugfile)
+            #
+            # refinamiento
+            #
+            refined_row_list, row_labels = refine_rows(I,row_list)
+            row_map = create_row_map(I,row_list,row_labels)
+            row_file = os.path.join(debugdir,fbase + "_raw_rows.png")
+            plt.imsave(row_file,row_map)
+            row_map = create_row_map(I,refined_row_list)
+            row_file = os.path.join(debugdir,fbase + "_refined_rows.png")
+            plt.imsave(row_file,row_map)
+            
+            #
             # deteccion de bloques primaria
             #
             fdebug = os.path.join(foutdir,fbase + '_debug_blocks.png')
-            block_list = detect_blocks(I,row_list,fdebug)
+            block_list = detect_blocks(I,refined_row_list,fdebug)
             #
             # refinamiento (se ve más de cerca cada bloque)
             #
-            block_list, block_labels = refine_blocks(I,block_list,debugdir)
-            #
-            # guardamos lista de bloques en archivo CSV
-            #
-            fblocks = open(fcsvblocks,'w')
-            for block_info in block_list:
-                print(functools.reduce(lambda a,b: str(a) + '\t' + str(b), block_info), file=fblocks)
-            fblocks.close()
+            refined_block_list, block_labels = refine_blocks(I,block_list)
             #
             # generamos imagen de analisis
             #
             block_map = create_block_map(I,block_list,block_labels)
-            block_file = os.path.join(debugdir,fbase + "_blocks.png")
+            block_file = os.path.join(debugdir,fbase + "_raw_blocks.png")
+            plt.imsave(block_file,block_map)
+            block_map = create_block_map(I,refined_block_list)
+            block_file = os.path.join(debugdir,fbase + "_refined_blocks.png")
             plt.imsave(block_file,block_map)
             #
+            # guardamos lista de bloques en archivo CSV
+            #
+            fblocks = open(fcsvblocks,'w')
+            for block_info in refined_block_list:
+                print(functools.reduce(lambda a,b: str(a) + '\t' + str(b), block_info), file=fblocks)
+            fblocks.close()
+           #
             # fin loop principal
             #
 
         if nimage > 0:
-            meandt = time.time() / nimage
+            meandt = (time.time() - t0) / nimage
             print(f'Average time per image: {meandt} seconds. ')
 
         nerr = len(errors)

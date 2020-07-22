@@ -1,2 +1,2 @@
 #/bin/bash
-wget https://iie.fing.edu.uy/~nacho/data/lkuisa/r0566.zip
+wget https://iie.fing.edu.uy/~nacho/data/luisa/r0566.zip
