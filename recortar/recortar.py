@@ -26,6 +26,7 @@ ROW_REL_THRES = 4     # 4 more pixels than local baseline
 COL_ABS_THRES = 1     # column has at least three pixels black
 COL_REL_THRES = 0.1   # the intensity of the column is less than 20% of the maximum
 MIN_WORD_SEP = 20     # minimum separation between two words
+MAX_LETTER_SEP = 18
 BLOCK_ABS_THRES = 4   # minimum number of pixels in a valid block
 TRAZO=1.0
 COLOR=(0.0,0.2,0.4,0.1)
@@ -35,7 +36,8 @@ MIN_ROW_HEIGHT = 20  # smallest letter I found was about 23
 
 #---------------------------------------------------------------------------------------
 
-def imwrite(fname,img):
+def imsave(fname,mat):
+    img = Image.fromarray(np.uint8(mat*255))
     img.save(fname)
 
 #---------------------------------------------------------------------------------------
@@ -57,23 +59,29 @@ def detect_bands(rmt, min_size):
     given a sequence of values, detects contiguous segments or 'bands' which are significantly
     darker than their neighborhood.
     '''
+    # mark positions of up and down flanks
     dif = np.int8(rmt[1:]) - np.int8(rmt[:-1])
     upidx = np.flatnonzero(dif > 0) + 1
     dnidx = np.flatnonzero(dif < 0) + 1 
-    if len(upidx) == 0:
-        print('not enough up flanks')
-        return list()
-    
-    if len(dnidx) == 0:
-        print('not enough down flanks')
-        return list()
-    
-    if (len(dnidx) > 1) & (dnidx[0] < upidx[0]): # lo primero que ocurre es flanco de bajada
-        dnidx = dnidx[1:]
 
-    if (len(upidx) > 1) & (len(upidx) > len(dnidx)):
-        upidx = upidx[:-1]
-        
+    # no up transitions
+    if len(upidx) == 0:
+        upidx = list()
+        upidx.append(0)
+
+    # no down transitions 
+    if len(dnidx) == 0:
+        dnidx = list()
+        dnidx.append(len(rmt))
+    
+    # if first flank is down, assume there is an up flank at 0
+    if (len(dnidx) > 1) & (dnidx[0] < upidx[0]): 
+        upidx = np.insert(upidx,0,0)
+
+    # more ups than downs means
+    if len(upidx) > len(dnidx):
+        dnidx = np.insert(dnidx,len(dnidx),len(rmt))
+    
     bands = list(zip(upidx,dnidx))
     return bands
 
@@ -140,7 +148,7 @@ def label_row(img,row_info):
     taspect = tw / th
     tsum = np.sum(trimmed_row)
 
-    if th > 90: # absolute height in pixels is more than twice the typical character height
+    if th > 70: # absolute height in pixels is more than twice the typical character height
         return 'tall'
     if th < 20: # absolute height in pixels (smallest letter height ~ 20 pixels) 
         return 'flat'
@@ -159,8 +167,6 @@ def refine_rows(img,row_list):
     #
     row_labels = [label_row(img,bi) for bi in row_list]
     lab,freq = np.unique(row_labels,return_counts=True)
-    for i in range(len(lab)):
-        print(lab[i],freq[i])
     
     R = zip(row_list,row_labels)
     refined_row_list = [t[0] for t in R if t[1] != 'flat'] 
@@ -215,11 +221,29 @@ def create_row_map(img,row_list,row_labels = None):
 
 #---------------------------------------------------------------------------------------
 
+def merge_blocks(row_blocks):
+    #
+    # join accidentally separated letters
+    # block : y0,x0,y1,x1
+    nblocks = len(row_blocks)
+    idx = 0
+    while idx < (nblocks-1):   
+        y0,x00,y1,x10 = row_blocks[idx]
+        y0,x01,y1,x11 = row_blocks[idx+1]
+
+        if (x01 - x10 ) < MAX_LETTER_SEP:
+            merged_block = (y0,x00,y1,x11)
+            del row_blocks[idx+1]
+            del row_blocks[idx]
+            row_blocks.insert(idx,merged_block)
+            nblocks -= 1
+        else:
+            idx += 1
+    return row_blocks
+
+#---------------------------------------------------------------------------------------
+
 def detect_blocks(img,row_list,debugfile):
-    # parameters of order filter
-    radius  = 100
-    domain  = np.arange(-radius,radius+1)
-    order   = int((radius*2+1)/3)
     #
     # cada rowa es luego cortada en bloques
     # para esto mide la intensidad promedio de cada columna en la rowa
@@ -231,23 +255,20 @@ def detect_blocks(img,row_list,debugfile):
     #
     block_list = list()
     row_idx   = 0
-    #
-    # altura de las rowas
-    #
     for row in row_list:
         y0 = row[0]
         y1 = row[1]
         Irow = I[y0:y1, :]
         col_sum = np.sum(Irow,axis=0)
         #
-        #col_sum_thresholded = (col_sum >= COL_ABS_THRES) * (col_sum >= COL_REL_THRES*np.max(col_sum))
         col_sum_thresholded = (col_sum >= COL_ABS_THRES) 
         #
-        # filtro de mediana para evitar separaciones entre palabras
+        # median filter to avoid
         #
-        col_sum_thresholded = dsp.medfilt(col_sum_thresholded, kernel_size=2*MIN_WORD_SEP+1)
+        #col_sum_thresholded = dsp.medfilt(col_sum_thresholded, kernel_size=2*MIN_WORD_SEP+1)
         row_blocks          = detect_bands(col_sum_thresholded, MIN_WORD_SEP)
         row_block_list = [(y0,x0,y1,x1) for (x0,x1) in row_blocks] 
+        row_block_list = merge_blocks(row_block_list)
         if len(row_block_list) > 0:
             block_list.append(row_block_list) # all row blocks in their own list
     #    
@@ -292,6 +313,8 @@ def label_block(img,block_info):
         return 'small'
     elif taspect > 20: # too long for a single word
         return 'long'
+    elif tw > 600: # too long for a single word
+        return 'long'
     elif (tsum > 0.9*tsize) or (tsum > (tsize - BLOCK_ABS_THRES)): # too dark
         return 'dark'
     elif  tsum < BLOCK_ABS_THRES:
@@ -313,26 +336,17 @@ def break_long_block(img,block_info):
     #
     y0,x0,y1,x1 = block_info
     block = img[y0:y1,x0:x1]
-    w,h = block.shape
-    #h2  = int(h/2)
-    #a   = np.mean( block[ :h2, : ] )
-    #threshold = np.minimum(1.5*a,1)
-    l = np.mean(block,axis=1)
-    y = np.flatnonzero(l > 0.85)[0]
-    print("bottom=",y)
-    col_thres = np.max(np.sum(block[y:,:], axis=0))
-    col_sum = np.sum(block[:y,:], axis=0)
-    col_sum_thresholded = col_sum >= col_thres
+    h,w = block.shape
+    col_sum = np.sum(block[:(h-5),:], axis=0) # small margin above underline
+    col_sum_thresholded = col_sum > COL_ABS_THRES
     row_blocks          = detect_bands(col_sum_thresholded, MIN_WORD_SEP)
-    print(row_blocks)
-    row_block_list = [(y0,x0+xi,y0+y,x0+xf) for (xi,xf) in row_blocks] 
+    row_block_list = [(y0,x0+xi,y1,x0+xf) for (xi,xf) in row_blocks] 
     if len(row_block_list) > 0:
         smaller_blocks = row_block_list # all row blocks in their own list
     else:
         smaller_blocks = list()
         smaller_blocks.append(block_info)
-        #print(np.round(a,2),np.round(l,2),np.max(l,axis=0),np.flatnonzero(l > threshold)[0])
-    return smaller_blocks
+    return merge_blocks(smaller_blocks)
 
 #---------------------------------------------------------------------------------------
 
@@ -422,6 +436,8 @@ def create_block_map(img,block_list,block_labels = None):
                 c = cmap(0.10) 
             elif label == 'small':
                 c = cmap(0.00)
+            elif label == 'empty':
+                c = cmap(0.40)
             elif label == 'dark':
                 c = cmap(0.80)
             else:
@@ -454,7 +470,7 @@ if __name__ == '__main__':
 		    help="text file where input pre-aligned files are specified")
     ap.add_argument("-f","--force", action="store_true",
 		    help="Forces the output to be overwritten even if it exists.")
-    ap.add_argument("-m","--margin", type=int, default=100,
+    ap.add_argument("-m","--margin", type=int, default=300,
 		    help="Cut this number of pixels from each side of image before analysis.")
     #
     # INICIALIZACION
@@ -514,37 +530,37 @@ if __name__ == '__main__':
             #
             # deteccion de bandas primaria
             #
-            debugfile = os.path.join(foutdir,fbase + '_debug_rows.png')
+            debugfile = os.path.join(foutdir,fbase + '_debug_rows.svg')
             row_list = detect_rows(I,debugfile)
             #
             # refinamiento
             #
             refined_row_list, row_labels = refine_rows(I,row_list)
             row_map = create_row_map(I,row_list,row_labels)
-            row_file = os.path.join(debugdir,fbase + "_raw_rows.png")
-            plt.imsave(row_file,row_map)
+            row_file = os.path.join(debugdir,fbase + "_raw_rows.tif")
+            imsave(row_file,row_map)
             row_map = create_row_map(I,refined_row_list)
-            row_file = os.path.join(debugdir,fbase + "_refined_rows.png")
-            plt.imsave(row_file,row_map)
+            row_file = os.path.join(debugdir,fbase + "_refined_rows.tif")
+            imsave(row_file,row_map)
             
             #
             # deteccion de bloques primaria
             #
-            fdebug = os.path.join(foutdir,fbase + '_debug_blocks.png')
+            fdebug = os.path.join(foutdir,fbase + '_debug_blocks.svg')
             block_list = detect_blocks(I,refined_row_list,fdebug)
             #
             # refinamiento (se ve más de cerca cada bloque)
             #
             refined_block_list, block_labels = refine_blocks(I,block_list)
             #
-            # generamos imagen de analisis
+            # imagen de analisis
             #
             block_map = create_block_map(I,block_list,block_labels)
-            block_file = os.path.join(debugdir,fbase + "_raw_blocks.png")
-            plt.imsave(block_file,block_map)
+            block_file = os.path.join(debugdir,fbase + "_raw_blocks.tif")
+            imsave(block_file,block_map)
             block_map = create_block_map(I,refined_block_list)
-            block_file = os.path.join(debugdir,fbase + "_refined_blocks.png")
-            plt.imsave(block_file,block_map)
+            block_file = os.path.join(debugdir,fbase + "_refined_blocks.tif")
+            imsave(block_file,block_map)
             #
             # guardamos lista de bloques en archivo CSV
             #
