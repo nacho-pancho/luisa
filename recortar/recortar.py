@@ -215,7 +215,6 @@ def create_row_map(img,row_list,row_labels = None):
 
 #---------------------------------------------------------------------------------------
 
-
 def detect_blocks(img,row_list,debugfile):
     # parameters of order filter
     radius  = 100
@@ -308,8 +307,31 @@ def break_long_block(img,block_info):
     - que sea texto subrayado, lo que no permite cortarlo 
     - que la separación entre palabras sea muy pequeña
     '''
-    smaller_blocks = list()
-    
+    #
+    # we take the average intensity from the upper half of the block and discard all the rows
+    # below the first one that significantly surpasses that intensity 
+    #
+    y0,x0,y1,x1 = block_info
+    block = img[y0:y1,x0:x1]
+    w,h = block.shape
+    #h2  = int(h/2)
+    #a   = np.mean( block[ :h2, : ] )
+    #threshold = np.minimum(1.5*a,1)
+    l = np.mean(block,axis=1)
+    y = np.flatnonzero(l > 0.85)[0]
+    print("bottom=",y)
+    col_thres = np.max(np.sum(block[y:,:], axis=0))
+    col_sum = np.sum(block[:y,:], axis=0)
+    col_sum_thresholded = col_sum >= col_thres
+    row_blocks          = detect_bands(col_sum_thresholded, MIN_WORD_SEP)
+    print(row_blocks)
+    row_block_list = [(y0,x0+xi,y0+y,x0+xf) for (xi,xf) in row_blocks] 
+    if len(row_block_list) > 0:
+        smaller_blocks = row_block_list # all row blocks in their own list
+    else:
+        smaller_blocks = list()
+        smaller_blocks.append(block_info)
+        #print(np.round(a,2),np.round(l,2),np.max(l,axis=0),np.flatnonzero(l > threshold)[0])
     return smaller_blocks
 
 #---------------------------------------------------------------------------------------
