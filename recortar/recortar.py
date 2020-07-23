@@ -536,12 +536,12 @@ if __name__ == '__main__':
             # refinamiento
             #
             refined_row_list, row_labels = refine_rows(I,row_list)
-            row_map = create_row_map(I,row_list,row_labels)
-            row_file = os.path.join(debugdir,fbase + "_raw_rows.tif")
-            imsave(row_file,row_map)
-            row_map = create_row_map(I,refined_row_list)
-            row_file = os.path.join(debugdir,fbase + "_refined_rows.tif")
-            imsave(row_file,row_map)
+            #row_map = create_row_map(I,row_list,row_labels)
+            #row_file = os.path.join(debugdir,fbase + "_raw_rows.tif")
+            #imsave(row_file,row_map)
+            #row_map = create_row_map(I,refined_row_list)
+            #row_file = os.path.join(debugdir,fbase + "_refined_rows.tif")
+            #imsave(row_file,row_map)
             
             #
             # deteccion de bloques primaria
@@ -555,18 +555,24 @@ if __name__ == '__main__':
             #
             # imagen de analisis
             #
-            block_map = create_block_map(I,block_list,block_labels)
-            block_file = os.path.join(debugdir,fbase + "_raw_blocks.tif")
-            imsave(block_file,block_map)
-            block_map = create_block_map(I,refined_block_list)
-            block_file = os.path.join(debugdir,fbase + "_refined_blocks.tif")
-            imsave(block_file,block_map)
+            #block_map = create_block_map(I,block_list,block_labels)
+            #block_file = os.path.join(debugdir,fbase + "_raw_blocks.tif")
+            #imsave(block_file,block_map)
+            #block_map = create_block_map(I,refined_block_list)
+            #block_file = os.path.join(debugdir,fbase + "_refined_blocks.tif")
+            #imsave(block_file,block_map)
             #
             # guardamos lista de bloques en archivo CSV
             #
             fblocks = open(fcsvblocks,'w')
-            for block_info in refined_block_list:
-                print(functools.reduce(lambda a,b: str(a) + '\t' + str(b), block_info), file=fblocks)
+            row = 0
+            for row_blocks in refined_block_list:
+                col = 0
+                for block in row_blocks:
+                    blocktxt = functools.reduce(lambda a,b: str(a) + '\t' + str(b), block)
+                    print(f"{row}\t{col}\t{blocktxt}", file=fblocks)
+                    col += 1
+                row += 1
             fblocks.close()
            #
             # fin loop principal
