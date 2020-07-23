@@ -7,44 +7,32 @@ import sqlite3 as dbserver
 #
 # VARIABLES GLOBALES
 #
-database='/datos/data/microfilm/microfilm.db'
-Port=3306
-###
-dbcursor={}
-dbconn={}
-        
+
+def getConnection(dbfile='luisa.db'):
+    if getConnection.dbconn is None:
+        getConnection.dbconn = dbserver.connect(dbfile)
+    return getConnection.dbconn
+getConnection.dbconn = None
+
+
 def getCursor():
-    global dbconn,dbcursor,Host,User,Password,Database
-    lcursor={}
-    try:
-        lcursor=dbconn.cursor()
-    except Exception as e:
-        #conectar nuevamente y repetir
-        print(type(e).__name__)
-        print("intentando reconectar....")
-        dbconn = dbserver.connect(Database)
-        try:
-            lcursor=dbconn.cursor()
-        except dbserver.OperationalError:
-            print("fallo en la reconexión")
-            raise dbserver.OperationalError
-        else:
-            print("...reconectado.")
-            return lcursor
-    else:
-        return lcursor
-    
-def queryExec(query,cursor=None,params=None,multi=False):
-    global dbconn,dbcursor,Host,User,Password,Database
-    if cursor is None:
-        cursor=dbcursor
-    print(query," params:",params," multi:",multi)
-    try:
-        cursor.execute(query,params,multi)
-    except: 
-        cursor=getCursor()
-        cursor.execute(query)
+    dbconn = getConnection()
+    getCursor.dbcursor = dbconn.cursor()
+    return getCursor.dbcursor
+getCursor.dbcursor = None
+
+def query(query):
+    print(query)
+    cursor = getCursor()
+    cursor.execute(query)
     return cursor
+
+def queryExec(query,cursor=None,params=None,multi=False):
+    print(query," params:",params," multi:",multi)
+    cursor = getCursor()
+    cursor.execute(query,params)
+    return cursor
+
 
 def callProc(proc,params=[]):
     '''
@@ -52,13 +40,8 @@ def callProc(proc,params=[]):
     '''
     return None
 
+
 def commit():
+    dbconn = getConnection()
     dbconn.commit()
 
-try:
-    dbconn = dbserver.connect(database)
-except dbserver.Error as e:
-    print(e)
-    raise dbserver.Error
-else:
-    dbcursor=getCursor()

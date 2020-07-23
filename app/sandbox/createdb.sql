@@ -65,8 +65,9 @@
 ------------------------------------------------------------------------------
 
 CREATE TABLE bloque (
-    id integer NOT NULL,
+    id integer PRIMARY KEY,
     idhoja integer,
+    fila integer NOT NULL,
     indice integer NOT NULL,
     i0 integer NOT NULL,
     j0 integer NOT NULL,
@@ -79,31 +80,25 @@ CREATE TABLE bloque (
 ------------------------------------------------------------------------------
 
 CREATE TABLE texto (
-    id integer NOT NULL,
+    id integer PRIMARY KEY NOT NULL,
     idbloque character varying(64),
-    texto character varying(256),
-    usuario integer
+    texto character varying(256)
 );
 
 ------------------------------------------------------------------------------
 
 CREATE TABLE hoja (
-    id integer NOT NULL,
-    rollo integer NOT NULL,
-    filename character varying(1024) NOT NULL,
-    rotacion integer,
-    i0 integer,
-    j0 integer NOT NULL,
-    hash character varying(64),
-    minCantVer integer DEFAULT 0 NOT NULL,
-    cantBloquesMin integer DEFAULT 0 NOT NULL,
-    apariciones integer DEFAULT 0 NOT NULL
+    id integer PRIMARY KEY NOT NULL,
+    numero integer NOT NULL,
+    idrollo integer NOT NULL,
+    path character varying(1024) NOT NULL,
+    hash character varying(64)
 );
 
 ------------------------------------------------------------------------------
 
 CREATE TABLE rollo (
-    id integer NOT NULL,
+    id integer PRIMARY KEY NOT NULL,
     numero integer,
     anio integer,
     path character varying(1024)
