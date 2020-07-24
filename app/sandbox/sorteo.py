@@ -33,27 +33,29 @@ def probPagina(frec_pag, score_ocr=None):
     return [x/C for x in a]
 
 
-def sortearPagina(id_pag, cantbloque_pag, frec_pag, score_ocr=None):
+def sortearHoja(id_pag, frec_pag, score_ocr=None):
     '''
     sortea una página para mostrar en LUISA.
     @see probPagina
     '''
     ### Si P es vacío, entonces no hay más páginas para rellenar.
     if len(frec_pag) == 0:
-        return -1  # no hay más páginas... TERMINAMOS !!!!!
+        return None 
 
     P = probPagina(frec_pag, score_ocr)
-    print("prob pagina",P)
-    print("DEBUG: prob de paginas: min=",min(P)," max=",max(P))
     dado = random.random()
     F = 0
     for i in range(len(P)):
         F = F + P[i]
         if F >= dado:
-         #   return id_pag[i] # cambiado para poder usar mejor el resultado
-            return i
+            return id_pag[i] 
 
 
-def sortearBloque(frec_bloque,score_bloque=None):
-    return random.randrange(0,len(frec_bloque))
+def sortearFila(nfilas):
+    return random.randrange(0,nfilas)
+
+
+def sortearBloque(frec_bloque):
+    nbloques = len(frec_bloque)
+    return random.randrange(0,nbloques)
     

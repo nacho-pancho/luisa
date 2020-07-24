@@ -92,7 +92,8 @@ CREATE TABLE hoja (
     numero integer NOT NULL,
     idrollo integer NOT NULL,
     path character varying(1024) NOT NULL,
-    hash character varying(64)
+    hash character varying(64),
+    apariciones integer DEFAULT 0 NOT NULL
 );
 
 ------------------------------------------------------------------------------

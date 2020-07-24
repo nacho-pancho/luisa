@@ -30,7 +30,7 @@ import sorteo
 #----------------------------------------------------------------------------------------------------
 #
 ROOTDIR  = os.path.dirname(os.path.realpath(__file__))
-IMGDIR   = ROOTDIR + "/img/"
+IMGDIR   = os.path.join(ROOTDIR,"../../datos/")
 EXT      = "tif"
 CACHEDIR = ROOTDIR + "/block_cache/"
 LOCAL_EXT = EXT
@@ -111,23 +111,26 @@ def gen_img_base64(img):
     #    en la página -- no se genera un link!
     #
     data     = str(base64.b64encode(buff.getvalue()),'utf8') #.encode('utf-8')
-    return   'data:image/gif;base64,%s' % data
+    # esto era para insertar en HTML:
+    # return   'data:image/gif;base64,%s' % data
+    # ahora devolvemos solo el stream B64
+    return data
 #
 #----------------------------------------------------------------------------------------------------
 #
-def gen_imagenes(id_hoja, idx_bloques):
+def gen_imagenes(id_hoja, id_bloques):
     global CTX_MARGIN_H, CTX_MARGIN_V
     tic = time.time()
     #
     # 1. seleccionamos hoja en base a hash
     # 
-    dbcursor = db.queryExec("SELECT hash as hashfile,rollo,filename FROM hoja WHERE hash=?",(id_hoja,))
+    dbcursor = db.query(f"SELECT hash as hashfile, idrollo, path FROM hoja WHERE id={id_hoja}")
     row      = dbcursor.fetchone()
     hash_hoja, id_rollo, filename = row[:]
     #
     # 2. necesitamos rollo para saber ruta completa
     #
-    dbcursor = db.queryExec("SELECT path FROM rollo WHERE numero=?",(id_rollo,))
+    dbcursor = db.query(f"SELECT path FROM rollo WHERE numero={id_rollo}")
     path     = dbcursor.fetchone()[0]
     #
     # 3. ruta completa del archivo 
@@ -137,15 +140,12 @@ def gen_imagenes(id_hoja, idx_bloques):
     # 4. abrimos imagen usando la funcion open de Pillow
     #
     img_hoja     = Image.open(IMGDIR+filename)
-    #dbcursor = db.callProc('getBloques',[id_hoja,idx_bloques,int(BLOCKS_PER_FORM/2)])    
-    #OJO Cambio id_hoja por hash_hoja
-    # Se agregó como último atributo el hash viejo (oldHash)
-    dbcursor = db.callProc('getBloques',[hash_hoja,idx_bloques,int(BLOCKS_PER_FORM/2)])
     
     b64_bloques = []
     i00,j00,i11,j11 = 10000,10000,0,0
     box_bloques = []
-    for row in dbcursor.fetchall():
+    for idb in id_bloques:
+        row = db.query(f"SELECT hash,i0,j0,i1,j1 FROM bloque WHERE id={idb}").fetchone()        
         i0,j0,i1,j1 = row[1:5]
         hash_bloque = row[0]
         i00,j00,i11,j11 = min(i00,i0),min(j00,j0),max(i11,i1),max(j11,j1)
@@ -158,7 +158,7 @@ def gen_imagenes(id_hoja, idx_bloques):
         img_bloque = img_hoja.crop(block_box)
         print("block", hash_bloque," box ",block_box, " size", img_bloque.size)
         b64_bloque = gen_img_base64(img_bloque)        
-        b64_bloques.append({'hash':hash_bloque,'b64img':b64_bloque,'width':img_bloque.size[0],'oldHash':hash_bloque })
+        b64_bloques.append({'hash':hash_bloque,'b64img':b64_bloque,'width':img_bloque.size[0],'height':img_bloque.size[1] })
 
     #
     # imagen de contexto: engloba al contexto mas un poco de margen extra
@@ -178,23 +178,17 @@ def gen_imagenes(id_hoja, idx_bloques):
         relbox = ( box[0] - context_box[0], box[1] - context_box[1],
           box[2] - context_box[0], box[3] - context_box[1] )
         canvas.rectangle(relbox,fill=192,outline=255)
+
+    dbcursor = db.query(f"SELECT hash as hashfile FROM hoja WHERE id={id_hoja}") 
+    hash_hoja = dbcursor.fetchone()[0]
+
     img_contexto = Image.blend(img_contexto, img_resaltar, 1.0/8.0).convert(mode='L')
-    b64_contexto = gen_img_base64(img_contexto)
-    return b64_bloques,b64_contexto,img_contexto.size
+    b64_contexto = {'hash':hash_hoja,'b64img':gen_img_base64(img_contexto),
+        'width':img_contexto.size[0], 'height':img_contexto.size[1]}; 
+    return b64_bloques, b64_contexto
 #
 #----------------------------------------------------------------------------------------------------
 # SERVICIO DE URLs / INTERFAZ DE USUARIO 
-#----------------------------------------------------------------------------------------------------
-#
-
-@bottle.route('/favicon.ico')
-def favicon():
-    '''
-    responde a la URL especificada arriba, que sólo devuelve un ícono para el sitio. 
-    '''
-    return bottle.static_file('favicon.ico', root=ROOTDIR,mimetype="image/ico")
-
-#
 #----------------------------------------------------------------------------------------------------
 #
 
@@ -204,136 +198,118 @@ def portada():
     Página principal. Utiliza la funcionalidad de templates provista por Bottle
     y el template definido en tmpl/layout.tpl incluido en el código adjunto.
     '''
-    lang=gLang(bottle.request)
-    return bottle.SimpleTemplate(name="tmpl/layout.tpl", lookup=["."]).render({
-            'lang':lang,
-            'inner':"tmpl/"+lang+"/index_"+lang+".tpl",
-            'extraclass':"luisa-portada-header",
-            'horas':horas
-        })
 
-@bottle.route('/docdic')
-def docdic():
-    ''' 
-    Genera una consulta web de LUISA.
-    Cada consulta sortea una página al azar, y luego un conjunto de bloques consecutivos
-    dentro de la página. Dichos bloques se muestran junto con campos de texto a rellenar
-    por el usuario. Finalmente, debajo de lo bloques, se muestra una imagen que permite
-    ver el contexto en donde se encuentran los bloques seleccionados, para facilitar la
-    transcripción.
-    '''
-    global cantConexiones
-    lang=gLang(bottle.request);
-    tic0 = time.time()
-    cantConexiones=cantConexiones+1   # sumamos una conexión.
-    row={}
-    if horas==0:
-        #
-        # sorteamos una hoja
-        #
-        tic = time.time()
-        frec_pag = list()
-        id_pag = list()
-        minver_pag=list()
-        cantbloques_pag=list()
-        ##### Se agrega minver_pag y cant bloquespag. Cant bloques es la cantidad de bloques con el mínimo y que no son ni vacíos ni completos.
-        ### Ojo. Una vez seleccionada la hoja, no interesa el estado de los bloques. Siempre hay que seleccionar uno.
-        # for row in db.queryExec("SELECT id,apariciones,mincantver,cantbloques\
-        #      FROM hoja\
-        #      where mincantver < {0} and cantbloques > 0\
-        #      order by id".format(topeBloque)):
-        #### La consulta selecciona hojas que tengan una cantidad una mínima cantidad de version < el tope (5) y al menos un bloque en esa cantidad.
-        #### Esto hace que una hoja no se seleccione cuando tiene al menos 5 como bloque mínimo o una cantidad de bloques mínima 0. 
-        #### La segunda condición no se debería dar nunca, porque cuando se llega a 0 bloques, entonces el mínimo debería haber subido.
-        #### Conclusión: sobra una condición que la sacamos.
-        for row in db.queryExec("SELECT hash as hashfile,apariciones,mincantver,cantbloques\
-             FROM hoja\
-             where mincantver <= ? and cantbloquesmin > 1\
-             order by id",(topeBloque,)):
-            id_pag.append( row[0] )
-            frec_pag.append( row[1] )
-            minver_pag.append(row[2])
-            cantbloques_pag.append(row[3])
+#-----------------------------------------------------------------------------
 
-        if (len(frec_pag)==0): ### TERMINAMOS !!!!!!!!
-            page = bottle.SimpleTemplate(name="tmpl/layout.tpl", lookup=["."]).render({
-                'lang':lang,
-                'inner': "tmpl/terminamos_"+lang+".tpl",
-                #'inner':"tmpl/statusSum.tpl",
-                'horas': horas,
-                'iparams': simpleStatus(),
-                'extraclass': 'luisa-portada-header'
-                #'overClass':"dashboard"
-            })
-            return page
-        ### Hay que volver el sorteo a que devuelva el índice así se puede usar para seleccionar tambien el mínimo de la pagina
-        idx_hoja = sorteo.sortearPagina(id_pag,cantbloques_pag, frec_pag)
-        id_hoja = id_pag[idx_hoja]
-        minver_hoja=minver_pag[idx_hoja]
-       
-        ### Aqui se podría agregar la recuperacion del mínimo a buscar.
-        dbcursor = db.queryExec("SELECT hash as hashfile FROM hoja WHERE hash=?",(id_hoja,)) 
-        hash_hoja = dbcursor.fetchone()[0]
-        # registramos tiempo de consulta de hoja
-        dt_sorteo_hoja = time.time() - tic 
-        print("TIME: Sorteo de  hoja:",dt_sorteo_hoja," segundos.")
-        #
-        # sorteo de bloques a mostrar dentro de la hoja
-        #
-        tic = time.time()
-        frec_bloques = list()
-        indices_bloques=list()
+def sortear_hoja():    
+    frec_hoja        = list()
+    id_hoja          = list()
+    for row in db.query("SELECT id, apariciones FROM hoja order by id"):
+        id_hoja.append( row[0] )
+        frec_hoja.append( row[1] )
+    return sorteo.sortearHoja( id_hoja, frec_hoja )
 
-       
-        for row in db.queryExec("SELECT indice,apariciones\
-             FROM bloque\
-            WHERE hashhoja=? and\
-                apariciones=?",(id_hoja,minver_hoja)):
-            frec_bloques.append(row[1])
-            indices_bloques.append(row[0])
+#-----------------------------------------------------------------------------
 
-        print("=(1)=> En la hoja",id_hoja," hay ",len(frec_bloques)," bloques disponibles. \n")
-        idx_bloque = indices_bloques[sorteo.sortearBloque(frec_bloques)] ### esto ya es el hashid nuevo. Deberíamos al menos por un tiempo, agregar también el viejo?
-        nbloques = len(frec_bloques)
-	#
-        # obtenemos las imagenes en base64
-        # 
-        bloques, contexto, size_contexto = gen_imagenes(id_hoja, idx_bloque)
-        
-        print(size_contexto)
-        ctx_width = size_contexto[0]*0.75
-        ctx_height = size_contexto[1]*0.75
+def sortear_bloques(id_hoja):
+    print("hoja",id_hoja)
+    #
+    # primero elegimos fila en la hoja
+    #
+    rows = db.query(f"SELECT MAX(fila) FROM bloque WHERE idhoja={id_hoja}").fetchone()
+    nfilas = rows[0]
+    idx_fila = sorteo.sortearFila(nfilas)
+    print("fila",idx_fila)
+    #
+    # luego elegimos un bloque al azar de esa fila
+    #
+    row = db.query(f"SELECT MAX(indice) FROM bloque WHERE idhoja={id_hoja} AND fila={idx_fila}").fetchone()
+    nbloques = row[0]+1
+    print("nbloques",nbloques)
 
-        page = bottle.SimpleTemplate(name="tmpl/layout.tpl", lookup=["."]).render(
-            {
-                'lang':lang,
-                'inner':"tmpl/"+lang+"/form_"+lang+".tpl",
-                'horas':horas,
-               'iparams': {
-                    'hash_hoja':hash_hoja,
-                    'page_generation_timestamp': time.time(),
-                    'contexto':contexto,
-                    'bloques':bloques,
-                    'width':ctx_width,
-                    'height':ctx_height
-                    }
-            }
-        )
-
-        dt_gen_pag = time.time() - tic0
-        print("TIME: Generacion de pagina",dt_gen_pag," segundos.")
-        cantConexiones=cantConexiones-1
-        return page
+    frec_bloques = list()
+    for row in db.query(f"SELECT id, apariciones FROM bloque WHERE idhoja={id_hoja} AND fila={idx_fila}"):
+        frec_bloques.append(row[1])
+    if nbloques > BLOCKS_PER_FORM:
+        max_idx_bloque = nbloques-BLOCKS_PER_FORM
     else:
-        cantConexiones=cantConexiones-1
-        return bottle.SimpleTemplate(name="tmpl/layout.tpl", lookup=["."]).render({
-            'lang':lang,
-            'inner': "tmpl/index_"+lang+".tpl",
-            'extraclass': "luisa-portada-header",
-            'horas': horas
-        })
+        max_idx_bloque = nbloques
+    #
+    # elegimos al azar el primer bloque de BLOCKS_PER_FORM bloques consecutivos,
+    # o sea que el maximo indice a sortear debe ser nbloques-BLOCKS_PER_FORM
+    #
+    idx_primer_bloque = sorteo.sortearBloque(frec_bloques[:max_idx_bloque])
+    idx_ultimo_bloque = min(nbloques,idx_primer_bloque + BLOCKS_PER_FORM)
+    id_bloques = list()
+    for row in db.query(f"SELECT id FROM bloque WHERE idhoja={id_hoja} AND fila={idx_fila} AND indice >= {idx_primer_bloque} AND indice < {idx_ultimo_bloque} ORDER BY indice"):
+        id_bloques.append(row[0])
+    print("bloques",id_bloques)
+    return id_bloques
 
-    
+#-----------------------------------------------------------------------------
+
+@bottle.route('/')
+def root():
+    bottle.response.content_type = 'text/html; charset=latin1'
+    body = "<!DOCTYPE html>\n"
+    body += "<html>\n<header><title></title></header>\n"
+    body += "<body>"
+    body += "<h1>Servidor Sandbox</h1>\n"
+    body += "<p>La URL <tt>/main</tt> devuelve un archivo de texto plano (text/plain)</p>\n"
+    body += "<p>El archivo es un CSV con 4 columnas:</p>\n"
+    body += "<pre>HASH GIFB64 WIDTH HEIGHT\n"
+    body += "<tt>HASH GIFB64 WIDTH HEIGHT\n"
+    body += "... </pre>\n"
+    body += "<ul>\n"
+    body += "<li>HASH es un SHA256 en hexadecimal que identifica al origen de la imagen en la base de datos</li>\n"
+    body += "<li>GIFB64 es la codificación en Base64 de los pixeles de la imagen en formato GIF</li>\n"
+    body += "<li>WIDTH y HEIGHT son el ancho y alto de la imagen correspondientemente</li>\n"
+    body += "</ul>\n"
+    body += "<p>La primera fila corresponde al hash de la hoja completa, y la imagen que le sigue es el 'contexto'</p>\n"
+    body += "<p>Cada fila adicional corresponde al hash, imagen, ancho y alto de un bloque</p>\n"
+    body += "</body>\n</html>"
+    return body    
+#-----------------------------------------------------------------------------
+
+@bottle.route('/main')
+def main():
+    ''' 
+    Genera una consulta de LUISA para ser procesada por una APP
+    El formato de la consulta es un documento de texto plano tipo CSV
+    La primera fila tiene el hash de la IMAGEN (no del bloque) y el base64 de la imagen de contexto
+    En el resto de las filas, la primera columna es el hash identificador de un bloque 
+    y la segunda es la imagen del bloque codificada en base64
+    '''
+    #
+    # sorteo de hoja
+    #
+    id_hoja = sortear_hoja()
+    #
+    # sorteo de bloques a mostrar dentro de la hoja
+    #
+    id_bloques = sortear_bloques(id_hoja)
+
+    # obtenemos las imagenes en base64
+    # 
+    bloques, contexto = gen_imagenes(id_hoja, id_bloques)
+    hash_hoja = contexto["hash"]
+    b64ctx  = contexto["b64img"]
+    width = contexto["width"]
+    height = contexto["height"]
+    csv = f"{hash_hoja}\t{b64ctx}\t{width}\t{height}\n"    
+    #
+    # obtenemos hash de bloques
+    #
+    for b in bloques:
+        hash_bloque = b["hash"]
+        b64_bloque  = b["b64img"]
+        width = b["width"]
+        height = b["height"]
+        csv = csv + f"{hash_bloque}\t{b64_bloque}\t{width}\t{height}\n"
+    bottle.response.content_type = 'text/plain; charset=latin1'
+    bottle.response.set_header('Pragma','no-cache')
+    return csv
+
 #
 #----------------------------------------------------------------------------------------------------
 #
@@ -341,65 +317,38 @@ def docdic():
 @bottle.route('/procesar',method="POST")
 def procesar():
     '''
-    Procesa la respuesta a una consulta de LUISA. Esto se da
-    luego de que el usuario completa los campos y presiona 'ingresar' o bien
-    presiona enter.
-    Los datos ingresados son subidos a la base de datos, se registra
-    un conjunto de estadísticas anónimas mínimas (temporalmente), y luego
-    se muestra automáticamente una nueva consulta.
+    Solo redirige a main
     '''
-    lang=gLang(bottle.request)
     for xHeader in bottle.request.headers:
         print(xHeader,":",bottle.request.headers[xHeader])
     prefixPath=""
-    goto=""
+
     if('X-PrefixPath' in bottle.request.headers):
         prefixPath=bottle.request.headers['X-PrefixPath']
+
     if('X-Forwarded-Server' in bottle.request.headers):
         hostList=bottle.request.headers['X-PrefixPath'].split(",")
         host=hostList[0]
     else:
         auxUrl=bottle.request.urlparts
         host=auxUrl[0]+"://"+auxUrl[1]
+
     if (prefixPath!=""):
-        goto="{0:s}/docdic".format(prefixPath)
+        goto="{0:s}/main".format(prefixPath)
     else:
-        goto="{0:s}/docdic".format(host)
+        goto="{0:s}/main".format(host)
+
     print("TIME: Procesamiento de respuesta:" , time.time() - tic0, " segundos.")    
-    #print "REDIRECT A",goto
-    bottle.response.set_header('Location','docdic?lang='+lang)
+
+    bottle.response.set_header('Location','main')
     bottle.response.status=303
+
 #
 #----------------------------------------------------------------------------------------------------
 #
-
-@bottle.route('/css/<style_file:path>')
-def style(style_file):
-    return bottle.static_file(style_file, root=ROOTDIR+'/css',mimetype="text/css")
-
-@bottle.route('/js/<js_file:path>')
-def style(js_file):
-    return bottle.static_file(js_file, root=ROOTDIR+'/js',mimetype="application/javascript")
-
 @bottle.route('/image/<img:path>')
 def style(img):
     return bottle.static_file(img, root=ROOTDIR+'/image',mimetype="image/jpg")
-#
-#----------------------------------------------------------------------------------------------------
-#
-
-#
-#----------------------------------------------------------------------------------------------------
-#
-@bottle.route('/about')
-def about():
-    lang=gLang(bottle.request)
-    return bottle.SimpleTemplate(name="tmpl/layout.tpl", lookup=["."]).render({
-            'lang':lang,
-            'inner':"tmpl/"+lang+"/sobreEquipo_"+lang+".tpl",
-            'extraclass':"luisa-about-page"
-        })
-
 #
 #----------------------------------------------------------------------------------------------------
 # INICIO DE SERVIDOR

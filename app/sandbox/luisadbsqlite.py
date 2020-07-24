@@ -27,18 +27,8 @@ def query(query):
     cursor.execute(query)
     return cursor
 
-def queryExec(query,cursor=None,params=None,multi=False):
-    print(query," params:",params," multi:",multi)
-    cursor = getCursor()
-    cursor.execute(query,params)
-    return cursor
-
-
-def callProc(proc,params=[]):
-    '''
-    SQlite no tiene stored procedures
-    '''
-    return None
+def queryExec(_query,cursor=None,params=None,multi=False):
+    return query(_query)
 
 
 def commit():
