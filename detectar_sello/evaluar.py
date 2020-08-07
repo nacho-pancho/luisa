@@ -38,6 +38,11 @@ from PIL import Image,ImageOps,ImageChops,ImageDraw
 import matplotlib.pyplot as plt
 
 #---------------------------------------------------------------------------------------
+def imread(fname):
+    img = Image.open(fname)
+    return 1-np.asarray(img,dtype=np.uint8)
+
+#---------------------------------------------------------------------------------------
 def evaluar_detectores(img,seals,methods):
     return [ m(img,seals) for m in methods]
 
@@ -50,11 +55,31 @@ def detector_nulo(img,seals):
 #---------------------------------------------------------------------------------------
 
 def detector_bobo(img,seals):
+    print('bobo')
     det = np.zeros(len(seals),dtype=np.float)
-    flipped_seals = [ np.fliplr(np.flipud(s)) for s in seals ]
-    norm_factors = [ 1.0/np.sum(s) for s in flipped_seals ]
-    correlations = [ np.max(dsp.correlate2d(img,s,mode="same")) for s in flipped_seals ]    
-    return np.round(correlations,2) 
+    i = 0
+    for s in seals:
+        fs = np.fliplr(np.flipud(s))
+        match = dsp.fftconvolve(img,fs,mode="same")
+        normi = dsp.fftconvolve(img,np.ones(fs.shape),mode="same")
+        norms = np.sum(s)
+        match = match / np.sqrt( norms * (normi + 1) )
+        plt.figure(figsize=(10,10))
+        plt.subplot(221)
+        plt.imshow(img)
+        plt.subplot(222)
+        plt.imshow(match)
+        plt.subplot(223)
+        plt.imshow(s)
+        plt.subplot(224)
+        scores = np.sort(match.ravel())
+        plt.plot(scores[-100:],'*')
+        plt.grid(True)
+        plt.title(f"sello {i}")
+        plt.show()
+        det[i] = np.max(match)
+        i += 1
+    return np.round(det,2) 
 
 #---------------------------------------------------------------------------------------
 
@@ -92,8 +117,7 @@ if __name__ == '__main__':
             fbase,fext = os.path.splitext(fname)
             input_fname = os.path.join(prefix,relfname)
             print(f'cargando sello #{nimage} fname={input_fname}')
-            img = Image.open(input_fname)
-            sellos.append(np.asarray(img,dtype=np.float))
+            sellos.append(imread(input_fname))
     #
     # armamos lista de detectores a evaluar
     #
@@ -136,12 +160,12 @@ if __name__ == '__main__':
             #
             # leemos imagen
             #
-            img = Image.open(input_fname)
+            img = imread(input_fname)
             #---------------------------------------------------
             # hacer algo en el medio
             #---------------------------------------------------
             truth = np.zeros(len(sellos),dtype=np.float)
-            detecciones = evaluar_detectores(np.asarray(img,dtype=np.float), sellos, detectores)
+            detecciones = evaluar_detectores(img, sellos, detectores)
             print(detecciones)
             #---------------------------------------------------
         #
