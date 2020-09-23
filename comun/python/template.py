@@ -27,13 +27,11 @@ import os.path
 import sys
 import time
 import argparse
-import math
+import scores
 #
 # bibliotecas adicionales necesarias
 #
 import numpy as np
-from PIL import Image,ImageOps,ImageChops,ImageDraw
-import matplotlib.pyplot as plt
 
 #---------------------------------------------------------------------------------------
 
