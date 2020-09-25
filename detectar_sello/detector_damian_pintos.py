@@ -37,13 +37,18 @@ import numpy as np
 from PIL import Image,ImageOps,ImageChops,ImageDraw
 import matplotlib.pyplot as plt
 from scipy import ndimage, misc
-from console_progressbar import ProgressBar
+from console_progressbar import ProgressBar # pip3 install console-progressbar
+from skimage import transform # pip3 install scikit-image
+
+#---------------------------------------------------------------------------------------
 
 def imread(fname):
     img = Image.open(fname)
     return 1-np.asarray(img,dtype=np.uint8)
 
-def achicar(a,proporcion):
+#---------------------------------------------------------------------------------------
+
+def achicar_DP(a,proporcion):
 	(norigx,norigy) = np.shape(a) 
 	nnuevox = norigx/proporcion
 	nnuevoy = norigy/proporcion
@@ -55,6 +60,16 @@ def achicar(a,proporcion):
 			salida[yr,yc] = np.max(a[int(xr):int(xr+stepx),int(xc):int(xc+stepy)])
 	return salida
 
+#---------------------------------------------------------------------------------------
+
+def achicar(a,proporcion):
+	ares =  transform.rescale(a.astype(np.float),1/proporcion,order=1,mode='constant',cval=0,anti_aliasing=False)
+	salida = (ares >= 0.45).astype(np.bool)
+	#print("achicar a proporcion",proporcion,100*np.sum(salida)/np.prod(salida.shape))
+	return salida
+
+#---------------------------------------------------------------------------------------
+
 def listaz(a,proporcion):
 	salida = []
 	salida.append(a)
@@ -65,6 +80,9 @@ def listaz(a,proporcion):
 		aa = achicar(aa,2)
 		salida.append(aa)
 	return salida
+
+#---------------------------------------------------------------------------------------
+
 def detector_bitabit(img,seals):
 	det = np.zeros(len(seals),dtype=np.float)
 	tolerancia = 0.5
@@ -94,9 +112,13 @@ def detector_bitabit(img,seals):
 				for i in range(largo-largos):
 					for j in range(ancho-anchos):
 						corte = imgz[i:largos+i,j:anchos+j]
+						sumacorte = np.sum(corte)
+						if not sumacorte:
+							continue
 						suma = np.sum(np.logical_and(corte == 1, sz == 1))
-						if (suma/sumasello)>=tolerancia:
-							validos.append((i,j,suma/sumasello))
+						score = suma / (sumasello*sumacorte)
+						if score >=tolerancia:
+							validos.append((i,j,score))
 			
 			proporcion = 256
 			ii = 1
@@ -172,6 +194,8 @@ def detector_bitabit(img,seals):
 		isello = isello+1
 	return det
 
+#---------------------------------------------------------------------------------------
+
 def detector_bitabitsinachicar(img,seals):
 	plt.imshow(img, interpolation='nearest')
 	plt.show()
@@ -239,12 +263,19 @@ def detector_bitabitsinachicar(img,seals):
 		plt.show()
 	return det
 
+#---------------------------------------------------------------------------------------
+
 def evaluar_detectores(img,seals,methods):
     return [ m(img,seals) for m in methods]
+
 #---------------------------------------------------------------------------------------
+
 def detector_nulo(img,seals):
     det = np.zeros(len(seals),dtype=np.float)
     return det
+
+#---------------------------------------------------------------------------------------
+
 if __name__ == '__main__':
     #
     # ARGUMENTOS DE LINEA DE COMANDOS
