@@ -28,6 +28,7 @@ import sys
 import time
 import argparse
 import math
+import csv
 import scipy.signal as dsp
 
 #
@@ -302,6 +303,17 @@ if __name__ == '__main__':
     #
     seals_file = args["seals"]
     sellos = list()
+	#
+	# grond truth
+	#
+    ground_truth = dict()
+    gtfname = args['truth']
+    with open(gtfname,'r') as gtfile:
+	    csvreader = csv.reader(gtfile, delimiter=' ')
+	    for row in csvreader:
+		    key = row[0]
+		    ground_truth[key] = row[1:]
+	
     with open(seals_file) as fl:
         nimage = 0
         for relfname in fl:
@@ -359,9 +371,10 @@ if __name__ == '__main__':
             #---------------------------------------------------
             # hacer algo en el medio
             #---------------------------------------------------
-            truth = np.zeros(len(sellos),dtype=np.float)
-            detecciones = evaluar_detectores(img, sellos, detectores)
-            print(detecciones)
+			gt = ground_truth[fbase] 
+			detecciones = evaluar_detectores(img, sellos, detectores)
+			print(gt)
+			print(detecciones)
             #---------------------------------------------------
         #
         # fin para cada archivo en la lista
@@ -369,5 +382,4 @@ if __name__ == '__main__':
     #
     # fin main
     #
-    
 #---------------------------------------------------------------------------------------
