@@ -38,7 +38,7 @@ import numpy as np
 from PIL import Image,ImageOps,ImageChops,ImageDraw
 import matplotlib.pyplot as plt
 from scipy import ndimage, misc
-from console_progressbar import ProgressBar # pip3 install console-progressbar
+#from console_progressbar import ProgressBar # pip3 install console-progressbar
 from skimage import transform # pip3 install scikit-image
 
 #---------------------------------------------------------------------------------------
@@ -50,10 +50,19 @@ def imread(fname):
 #---------------------------------------------------------------------------------------
 
 def achicar(a,proporcion):
- ares =  transform.rescale(a.astype(np.float),1/proporcion,order=1,mode='constant',cval=0,anti_aliasing=False)
- salida = (ares >= 0.45).astype(np.bool)
- #print("achicar a proporcion",proporcion,100*np.sum(salida)/np.prod(salida.shape))
- return salida
+    ares =  transform.rescale(a.astype(np.float),1/proporcion,order=1,mode='constant',cval=0,anti_aliasing=True)
+    salida = (ares >= 0.45).astype(np.bool)
+    print("achicar a proporcion",proporcion,100*np.sum(salida)/np.prod(salida.shape))
+    return salida
+
+#---------------------------------------------------------------------------------------
+
+def achicar_sgn(a,proporcion):
+    ares =  transform.rescale(a.astype(np.float),1/proporcion,order=1,mode='constant',cval=0,anti_aliasing=True)
+    ares[ares >   0.45 ]=  1 
+    ares[ares <= -0.45 ]= -1
+    #print("achicar a proporcion",proporcion,100*np.sum(ares > 0)/np.prod(ares.shape))
+    return ares
 
 
 #---------------------------------------------------------------------------------------
@@ -62,31 +71,37 @@ def detector_fft_un_sello(I,S):
     #
     # reducimos imagen y sello a 1/4 de resolucion
     #
-    I = achicar(I,4)
-    m,n=I.shape
-    I[I == 0] = -1
-    angles = np.arange(-5,5.5,step=0.5)
-    matches = np.zeros((len(angles),4)
-    for i in len(angles): 
+    Is = achicar_sgn(I,4)
+    m,n = Is.shape
+    angles  = np.arange(-5,5.5,step=0.5)
+    matches = np.zeros((len(angles),4),dtype=np.int)
+    for i in range(len(angles)): 
         ang = angles[i]
-        Sr = ndimage.rotate(sello,ang)
-        Srs = achicar(srot,4)
-        Srs[Srs == 0] = -1 
-        G = dsp.fftconvolve(I,Srs,mode='same')
+        Sr  = ndimage.rotate(S,ang)
+        Srs = achicar_sgn(Sr,4)
+        N = np.prod(Srs.shape)
+        G = dsp.fftconvolve(Is,Srs,mode='same')
         limax = np.argmax(G)
         imax = limax // n
         jmax = limax - imax*n
         matches[i,0] = ang
         matches[i,1] = imax
         matches[i,2] = jmax
-        matches[i,3] = G[imax,jmax]
-    print(matches)
-    
+        matches[i,3] = int(10000 * G[imax,jmax] / N)
+    #
+    # tomamos salida de mayor correlacion
+    #
+    best_angle_idx = np.argmax(matches[:,-1])
+    matches = matches[best_angle_idx,:]
+    return matches 
     
 #---------------------------------------------------------------------------------------
 
 def detector_fft(img,seals):
-    return [detector_fft_un_sello(img,s) for s in seals]
+    for i in range(len(seals)):
+        matches = detector_fft_un_sello(img,seals[i])
+        print(f"sello {i} score {matches[3]}")
+    #return [detector_fft_un_sello(img,s) for s in seals]
         
 #---------------------------------------------------------------------------------------
 
@@ -152,7 +167,7 @@ if __name__ == '__main__':
     # armamos lista de detectores a evaluar
     #
     detectores = list()
-    detectores.append(detector_bitabit)
+    detectores.append(detector_fft)
 
     #
     # abrimos lista de archivos
