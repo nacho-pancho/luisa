@@ -49,59 +49,157 @@ def imread(fname):
 
 #---------------------------------------------------------------------------------------
 
-def achicar(a,proporcion):
-    ares =  transform.rescale(a.astype(np.float),1/proporcion,order=1,mode='constant',cval=0,anti_aliasing=True)
-    salida = (ares >= 0.45).astype(np.bool)
-    print("achicar a proporcion",proporcion,100*np.sum(salida)/np.prod(salida.shape))
-    return salida
+#def achicar(a,proporcion):
+#    ares =  transform.rescale(a.astype(np.float),1/proporcion,order=1,mode='constant',cval=0,anti_aliasing=True)
+#    salida = (ares >= 0.45).astype(np.bool)
+#    print("achicar a proporcion",proporcion,100*np.sum(salida)/np.prod(salida.shape))
+#    return salida
 
 #---------------------------------------------------------------------------------------
 
-def achicar_sgn(a,proporcion):
-    ares =  transform.rescale(a.astype(np.float),1/proporcion,order=1,mode='constant',cval=0,anti_aliasing=True)
-    ares[ares >   0.45 ]=  1 
-    ares[ares <= -0.45 ]= -1
-    #print("achicar a proporcion",proporcion,100*np.sum(ares > 0)/np.prod(ares.shape))
+def reducir(a,razon):
+    ares =  transform.rescale(a.astype(np.float),razon,order=1,mode='constant',cval=0,anti_aliasing=True)
     return ares
 
+#---------------------------------------------------------------------------------------
+
+def ampliar(a,shape):
+    return  transform.resize(a,shape,mode='constant',cval=0,anti_aliasing=True)
 
 #---------------------------------------------------------------------------------------
 
-def detector_fft_un_sello(I,S):
+def show_image(img):
+    plt.figure(figsize=(10,10))
+    plt.imshow(img)
+    plt.colorbar()
+
+#---------------------------------------------------------------------------------------
+
+def show_match(I,S,i,j):
+    img  = I.copy()
+    seal = S.copy()
+    ms,ns =  seal.shape
+    m,n  = img.shape
+    i0 = int(i)-ms//2
+    i1 = i0 + ms
+    j0 = int(j)-ns//2
+    j1 = j0 + ns
+    if i0 < 0:
+        seal = seal[-i0:,:]
+        i0 = 0
+    if j0 < 0:
+        seal = seal[:,-j0:]
+        j0 = 0
+    if i1 > m:
+        seal = seal[:m-i1,:]
+        i1 = m
+    if j1 > n:
+        seal = seal[:,:n-j1]
+        j1 = n
+    img[i0:i1,j0:j1] += 2*seal
+    show_image(img)
+
+#---------------------------------------------------------------------------------------
+
+def detector_fft_un_sello(image_scales,seal_scales):
     #
-    # reducimos imagen y sello a 1/4 de resolucion
+    # factores de normalizacion
     #
-    Is = achicar_sgn(I,4)
-    m,n = Is.shape
-    angles  = np.arange(-5,5.5,step=0.5)
-    matches = np.zeros((len(angles),4),dtype=np.int)
-    for i in range(len(angles)): 
-        ang = angles[i]
-        Sr  = ndimage.rotate(S,ang)
-        Srs = achicar_sgn(Sr,4)
-        N = np.prod(Srs.shape)
-        G = dsp.fftconvolve(Is,Srs,mode='same')
-        limax = np.argmax(G)
-        imax = limax // n
-        jmax = limax - imax*n
-        matches[i,0] = ang
-        matches[i,1] = imax
-        matches[i,2] = jmax
-        matches[i,3] = int(10000 * G[imax,jmax] / N)
-    #
-    # tomamos salida de mayor correlacion
-    #
-    best_angle_idx = np.argmax(matches[:,-1])
-    matches = matches[best_angle_idx,:]
-    return matches 
+    scores = dict()
+    Gtotal = np.zeros(image_scales[0.5].shape)
+    best_score = 0
+    base_scale = np.max(list(seal_scales.keys()))
+    base_shape = image_scales[base_scale].shape
+    Gtotal    =  np.zeros(base_shape)
+    for s in seal_scales.keys():
+        Is  = image_scales[s]
+        m,n = Is.shape
+        seal_rotations = seal_scales[s]
+        best_score = 0
+        best_angle = 0
+        best_i = 0
+        best_j = 0
+        best_G = 0
+        for a in seal_rotations.keys():
+            ssr = seal_rotations[a]
+            G = dsp.fftconvolve( Is, np.flipud(ssr), mode='same' ) 
+            limax = np.argmax( G )
+            imax  = limax // n
+            jmax  = limax - imax*n
+            gmax = G[imax,jmax]
+            if best_score < gmax:
+                best_score = gmax
+                best_angle = a
+                best_i     = imax*base_scale/s
+                best_j     = jmax*base_scale/s
+                best_G     = G.copy()
+        print(f"\tscale {s} angle {best_angle} maximum {best_score:7.5f} at ({best_i},{best_j})")
+        Gtotal += ampliar(best_G,base_shape)
+        #
+        # tomamos salida de mayor correlacion
+        #
+        show_match(Is,seal_scales[s][best_angle],best_i,best_j)
+    plt.figure(figsize=(10,10))
+    plt.imshow(Gtotal)
+    plt.title("G total")
+    plt.show()
+    limax = np.argmax( Gtotal )
+    imax  = limax // base_shape[1]
+    jmax  = limax - imax*base_shape[1]
+    gmax = Gtotal[imax,jmax]
+    print(f"global score {gmax} at ({imax},{jmax})")
+    return best_score 
     
 #---------------------------------------------------------------------------------------
 
-def detector_fft(img,seals):
+def detector_fft(I,seals):
+    maxw = 0
+    maxh = 0
+    scales = (0.5,0.25,0.125)
+    angles = np.arange(-3,3.5,0.5)
+    print("Precomputing scales and rotations")
+    #
+    # tamaño comun para todos los sellos
+    #
     for i in range(len(seals)):
-        matches = detector_fft_un_sello(img,seals[i])
-        print(f"sello {i} score {matches[3]}")
-    #return [detector_fft_un_sello(img,s) for s in seals]
+        if seals[i].shape[0] > maxh:
+            maxh = seals[i].shape[0]
+        if seals[i].shape[1] > maxw:
+            maxw = seals[i].shape[1]
+    plantilla0 = np.zeros((maxh,maxw))
+    plantilla1 = np.ones ((maxh,maxw))
+    #
+    # precalcular imagenes escaladas y normalizadas
+    #
+    image_scales = dict()
+    for s in scales:
+        image_scales[s] =  reducir( I, s )
+        In  = dsp.fftconvolve( image_scales[s], plantilla1, mode='same' )
+        Ini = 1.0 / np.sqrt( np.maximum(In,1) )
+        image_scales[s] *= Ini
+    #
+    # precalcular sellos escalados, rotados y normalizados
+    #
+    nseals = len(seals)
+    for i in range( nseals ):
+        print(f"seal {i} of {nseals}")
+        seal = seals[ i ]
+        seal_scales = dict()
+        for s in scales:
+            print(f"\tscale {s}")
+            seal_scales[s] = dict()
+            for a in angles:
+                #print(f"\t\tangle {a}")
+                ssr = reducir( ndimage.rotate( seal, a ), s ) 
+                sh,sw = ssr.shape
+                sn    = 1.0 / np.linalg.norm( ssr.ravel() )
+                aux   = plantilla0.copy()
+                ioff  = ( maxh - sh ) // 2
+                joff  = ( maxw - sw ) // 2
+                aux[ ioff:ioff+sh, joff:joff+sw ] = ssr*sn
+                seal_scales[s][a] = aux
+        score = detector_fft_un_sello( image_scales, seal_scales )
+        print( f"sello {i} score {score}" )
         
 #---------------------------------------------------------------------------------------
 
@@ -162,7 +260,8 @@ if __name__ == '__main__':
             fbase,fext = os.path.splitext(fname)
             input_fname = os.path.join(prefix,relfname)
             print(f'cargando sello #{nimage} fname={input_fname}')
-            sellos.append(imread(input_fname))
+            sello = imread(input_fname)
+            sellos.append(sello)
     #
     # armamos lista de detectores a evaluar
     #
