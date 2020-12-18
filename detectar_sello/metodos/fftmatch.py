@@ -130,24 +130,24 @@ def detector_fft_un_sello(image_scales,seal_scales):
             if best_score < gmax:
                 best_score = gmax
                 best_angle = a
-                best_i     = imax*base_scale/s
-                best_j     = jmax*base_scale/s
+                best_i     = int(imax*base_scale/s)
+                best_j     = int(jmax*base_scale/s)
                 best_G     = G.copy()
-        print(f"\tscale {s} angle {best_angle} maximum {best_score:7.5f} at ({best_i},{best_j})")
+        print(f"\tscale {s:7.5f} angle {best_angle:5.2f} maximum {best_score:5.3f} at ({best_i:5d},{best_j:5d})")
         Gtotal += ampliar(best_G,base_shape)
         #
         # tomamos salida de mayor correlacion
         #
-        show_match(Is,seal_scales[s][best_angle],best_i,best_j)
-    plt.figure(figsize=(10,10))
-    plt.imshow(Gtotal)
-    plt.title("G total")
-    plt.show()
+        #show_match(Is,seal_scales[s][best_angle],best_i,best_j)
+    #plt.figure(figsize=(10,10))
+    #plt.imshow(Gtotal)
+    #plt.title("G total")
+    #plt.show()
     limax = np.argmax( Gtotal )
     imax  = limax // base_shape[1]
     jmax  = limax - imax*base_shape[1]
-    gmax = Gtotal[imax,jmax]
-    print(f"global score {gmax} at ({imax},{jmax})")
+    best_score = Gtotal[imax,jmax]
+    #print(f"global score {gmax} at ({imax},{jmax})")
     return best_score 
     
 #---------------------------------------------------------------------------------------
@@ -156,8 +156,9 @@ def detector_fft(I,seals):
     maxw = 0
     maxh = 0
     scales = (0.5,0.25,0.125)
-    angles = np.arange(-3,3.5,0.5)
-    print("Precomputing scales and rotations")
+    scales = (0.7,0.6,0.5,0.4)
+    angles = np.arange(-3,3.25,0.25)
+    #print("Precomputing scales and rotations")
     #
     # tamaño comun para todos los sellos
     #
@@ -171,22 +172,24 @@ def detector_fft(I,seals):
     #
     # precalcular imagenes escaladas y normalizadas
     #
+    # usamos una convolucion para estimar la norma 2 de cada patch de la imagen
+    # es la raiz de la suma del cuadrado de los pixeles en cada patch
     image_scales = dict()
     for s in scales:
         image_scales[s] =  reducir( I, s )
-        In  = dsp.fftconvolve( image_scales[s], plantilla1, mode='same' )
-        Ini = 1.0 / np.sqrt( np.maximum(In,1) )
-        image_scales[s] *= Ini
+        In  = dsp.fftconvolve( image_scales[s]**2, plantilla1, mode='same' )
+        image_scales[s] /= np.sqrt(np.maximum(In,1)) 
     #
     # precalcular sellos escalados, rotados y normalizados
     #
     nseals = len(seals)
+    scores = list()
     for i in range( nseals ):
-        print(f"seal {i} of {nseals}")
+        #print(f"seal {i} of {nseals}")
         seal = seals[ i ]
         seal_scales = dict()
         for s in scales:
-            print(f"\tscale {s}")
+            #print(f"\tscale {s}")
             seal_scales[s] = dict()
             for a in angles:
                 #print(f"\t\tangle {a}")
@@ -199,8 +202,9 @@ def detector_fft(I,seals):
                 aux[ ioff:ioff+sh, joff:joff+sw ] = ssr*sn
                 seal_scales[s][a] = aux
         score = detector_fft_un_sello( image_scales, seal_scales )
-        print( f"sello {i} score {score}" )
-        
+        print( f"sello {i:3d} score {score:5.3f}" )
+        scores.append(score)
+    return scores
 #---------------------------------------------------------------------------------------
 
 def evaluar_detectores(img,seals,methods):
@@ -249,7 +253,7 @@ if __name__ == '__main__':
      csvreader = csv.reader(gtfile, delimiter=' ')
      for row in csvreader:
       key = row[0]
-      ground_truth[key] = row[1:-1] # ultimo es espacio 
+      ground_truth[key] = [ int(r) for r in row[1:-1]] # ultimo es espacio 
  
     with open(seals_file) as fl:
         nimage = 0
@@ -259,7 +263,7 @@ if __name__ == '__main__':
             reldir,fname = os.path.split(relfname)
             fbase,fext = os.path.splitext(fname)
             input_fname = os.path.join(prefix,relfname)
-            print(f'cargando sello #{nimage} fname={input_fname}')
+            #print(f'cargando sello #{nimage} fname={input_fname}')
             sello = imread(input_fname)
             sellos.append(sello)
     #
@@ -314,7 +318,7 @@ if __name__ == '__main__':
             gt = ground_truth[fbase] 
             print("\ttruth:",gt)
             detecciones = evaluar_detectores(img, sellos, detectores)
-            print("\tDP:",detecciones)
+            print("\tscore:",[np.round(d,2) for d in detecciones])
             #---------------------------------------------------
         #
         # fin para cada archivo en la lista
