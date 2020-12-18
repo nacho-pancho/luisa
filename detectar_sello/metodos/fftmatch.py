@@ -41,6 +41,8 @@ from scipy import ndimage, misc
 #from console_progressbar import ProgressBar # pip3 install console-progressbar
 from skimage import transform # pip3 install scikit-image
 
+verbose = False
+
 #---------------------------------------------------------------------------------------
 
 def imread(fname):
@@ -99,18 +101,22 @@ def show_match(I,S,i,j):
     img[i0:i1,j0:j1] += 2*seal
     show_image(img)
 
+def correlate(img,sello):
+    return dsp.correlate( img, sello, method="fft",mode='same' ) 
+
 #---------------------------------------------------------------------------------------
 
 def detector_fft_un_sello(image_scales,seal_scales):
     #
     # factores de normalizacion
     #
-    scores = dict()
     best_score = 0
     base_scale = np.max(list(seal_scales.keys()))
     base_image,_ = image_scales[base_scale]
     base_shape = base_image.shape
-    Gtotal    =  np.zeros(base_shape)
+    nscales = len(seal_scales.keys())
+    Gtotal    =  np.zeros((*base_shape,nscales))
+    nscale = 0
     for s in seal_scales.keys():
         Is,Isn  = image_scales[s]
         m,n = Is.shape
@@ -122,7 +128,7 @@ def detector_fft_un_sello(image_scales,seal_scales):
         best_G = 0
         for a in seal_rotations.keys():
             ssr = seal_rotations[a]
-            G = dsp.fftconvolve( Is, np.flipud(ssr), mode='same' ) / Isn 
+            G = correlate( Is, ssr ) / Isn 
             limax = np.argmax( G )
             imax  = limax // n
             jmax  = limax - imax*n
@@ -133,28 +139,27 @@ def detector_fft_un_sello(image_scales,seal_scales):
                 best_i     = int(imax*base_scale/s)
                 best_j     = int(jmax*base_scale/s)
                 best_G     = G.copy()
-        print(f"\tscale {s:7.5f} angle {best_angle:5.2f} maximum {best_score:5.3f} at ({best_i:5d},{best_j:5d})")
-        Gtotal += ampliar(best_G,base_shape)
-        #
-        # tomamos salida de mayor correlacion
-        #
-        #show_match(Is,seal_scales[s][best_angle],best_i,best_j)
-    #plt.figure(figsize=(10,10))
-    #plt.imshow(Gtotal)
-    #plt.title("G total")
-    #plt.show()
+        if verbose:
+            print(f"\tscale {s:7.5f} angle {best_angle:5.2f} maximum {best_score:5.3f} at ({best_i:5d},{best_j:5d})")
+        Gtotal[:,:,nscale] = ampliar(best_G,base_shape)
+        nscale += 1
+    Gtotal = np.median(Gtotal,axis=2)
     limax = np.argmax( Gtotal )
     imax  = limax // base_shape[1]
     jmax  = limax - imax*base_shape[1]
     best_score = Gtotal[imax,jmax]
-    #print(f"global score {gmax} at ({imax},{jmax})")
-    return best_score 
+    return best_score
     
 #---------------------------------------------------------------------------------------
 
 def detector_fft(I,seals,args):
     cachedir = args["cachedir"]
     imgname  = args["name"]
+    score_cache = os.path.join(cachedir,f"{imgname}-scores.npy")
+    if os.path.exists(score_cache):
+        scores = np.load(score_cache)
+        return scores
+
     if not os.path.exists(cachedir):
         os.makedirs(cachedir)
     maxw = 0 
@@ -184,7 +189,7 @@ def detector_fft(I,seals,args):
         fcache = os.path.join(cachedir,f"{imgname}-scale{s:5.3f}.npy")
         if not os.path.exists(fcache):
             Is =  reducir( I, s )
-            Isn  = dsp.fftconvolve( Is**2, plantilla1, mode='same' )
+            Isn  = correlate( Is**2, plantilla1 )
             Isn = np.sqrt(np.maximum(Isn,1e-16))
             np.save(fcache,Is)            
             fcache = os.path.join(cachedir,f"{imgname}-scale{s:5.3f}.jpg")
@@ -214,19 +219,32 @@ def detector_fft(I,seals,args):
             maxhs = int(np.ceil(1.1*maxh*s))
             maxws = int(np.ceil(1.1*maxw*s))
             for a in angles:
-                #print(f"\t\tangle {a}")
-                ssr = reducir( ndimage.rotate( seal, a ), s ) 
-                sh,sw = ssr.shape
-                sn    = 1.0 / np.linalg.norm( ssr.ravel() )                
-                aux = np.zeros((maxhs,maxws))
-                ioff  = ( maxhs - sh ) // 2
-                joff  = ( maxws - sw ) // 2
-                #print(maxhs,ioff,sh,maxws,joff,sw)
-                aux[ ioff:ioff+sh, joff:joff+sw ] = ssr*sn
-                seal_scales[s][a] = aux
+                aa = abs(a)
+                if a < 0:
+                    sgn = '-'
+                else:
+                    sgn = '+'
+                fcache = os.path.join(cachedir,f"sello{i:02d}-scale{s:5.3f}-angle{sgn}{aa:06.3f}.npy")
+                if os.path.exists(fcache):
+                    seal_scales[s][a] = np.load(fcache)
+                else:    
+                    ssr = reducir( ndimage.rotate( seal, a ), s ) 
+                    sh,sw = ssr.shape
+                    sn    = 1.0 / np.linalg.norm( ssr.ravel() )                
+                    aux = np.zeros((maxhs,maxws))
+                    ioff  = ( maxhs - sh ) // 2
+                    joff  = ( maxws - sw ) // 2
+                    #print(maxhs,ioff,sh,maxws,joff,sw)
+                    aux[ ioff:ioff+sh, joff:joff+sw ] = ssr*sn
+                    seal_scales[s][a] = aux
+                    np.save(fcache,aux)
+                    fcache = os.path.join(cachedir,f"sello{i:02d}-scale{s:5.3f}-angle{sgn}{aa:6.3f}.png")
+                    imsave(fcache,aux)
         score = detector_fft_un_sello( image_scales, seal_scales )
-        print( f"sello {i:3d} score {score:5.3f}" )
+        if verbose:
+            print( f"sello {i:3d} score {score:5.3f}" )
         scores.append(score)
+    np.save(score_cache,scores)
     return scores
 #---------------------------------------------------------------------------------------
 
@@ -295,7 +313,9 @@ if __name__ == '__main__':
     # la lista es un archivo de texto con un nombre de archivo
     # en cada linea
     #
-    list_file = args["list"]
+    list_file  = args["list"]
+    all_scores = list()
+    all_gt     = list()
     with open(list_file) as fl:
         t0 = time.time()
         nimage = 0
@@ -333,17 +353,20 @@ if __name__ == '__main__':
             #---------------------------------------------------
             # hacer algo en el medio
             #---------------------------------------------------
-            # 
+            #
             gt = ground_truth[fbase] 
-            print("\ttruth:",gt)
             args["reldir"] = reldir
             args["name"]   = fbase
             scores = detector_fft(img,sellos,args)
+            print("\ttruth:",gt)
             print("\tscore:",[np.round(d,2) for d in scores])
+            all_scores.append(scores)
+            all_gt.append(gt)
             #---------------------------------------------------
         #
         # fin para cada archivo en la lista
         #
+
     #
     # fin main
     #
