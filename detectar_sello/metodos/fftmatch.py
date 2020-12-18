@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#
 # -*- coding: utf-8 -*-
 """
 Plantilla de archivo para trabajar en los distintos proyectos de LUISA
@@ -47,6 +47,12 @@ verbose = False
 
 def imread(fname):
     img = Image.open(fname)
+    if not fname.endswith('tif'):
+        return 1-np.asarray(img,dtype=np.uint8)
+    if not 274 in img.tag_v2:
+        return 1-np.asarray(img,dtype=np.uint8)
+    if img.tag_v2[274] == 8: # regression bug in PILLOW for TIFF images
+        img = img.rotate(-90, resample=Image.NEAREST,expand=True,fillcolor=1)
     return 1-np.asarray(img,dtype=np.uint8)
 
 #---------------------------------------------------------------------------------------
