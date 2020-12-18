@@ -29,11 +29,7 @@ import time
 import argparse
 import math
 import csv
-import multiprocessing
-import functools
-
 import scipy.signal as dsp
-
 
 #
 # bibliotecas adicionales necesarias
@@ -218,7 +214,7 @@ def detector_fft(I,seals,args):
     # precalcular sellos escalados, rotados y normalizados
     #
     nseals = len(seals)
-    scaled_and_rotated_seals = list()
+    scores = list()
     for i in range( nseals ):
         #print(f"seal {i} of {nseals}")
         seal = seals[ i ]
@@ -250,17 +246,10 @@ def detector_fft(I,seals,args):
                     np.save(fcache,aux)
                     fcache = os.path.join(cachedir,f"sello{i:02d}-scale{s:5.3f}-angle{sgn}{aa:6.3f}.png")
                     imsave(fcache,aux)
-        scaled_and_rotated_seals.append(seal_scales)
-    #
-    # hacer la comparacion
-    #
-    pool = multiprocessing.Pool()
-    scores = pool.map( functools.partial(detector_fft_un_sello, image_scales), scaled_and_rotated_seals)
-    pool.close()
-    pool.join()
-    #if verbose:
-    #    print( f"sello {i:3d} score {score:5.3f}" )
-    #scores.append(score)
+        score = detector_fft_un_sello( image_scales, seal_scales )
+        if verbose:
+            print( f"sello {i:3d} score {score:5.3f}" )
+        scores.append(score)
     np.save(score_cache,scores)
     return scores
 #---------------------------------------------------------------------------------------
