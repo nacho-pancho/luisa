@@ -35,7 +35,7 @@ import scipy.signal as dsp
 # bibliotecas adicionales necesarias
 #
 import numpy as np
-from PIL import Image,ImageOps,ImageChops,ImageDraw
+from PIL import Image
 import matplotlib.pyplot as plt
 from scipy import ndimage, misc
 #from console_progressbar import ProgressBar # pip3 install console-progressbar
@@ -49,11 +49,11 @@ def imread(fname):
 
 #---------------------------------------------------------------------------------------
 
-#def achicar(a,proporcion):
-#    ares =  transform.rescale(a.astype(np.float),1/proporcion,order=1,mode='constant',cval=0,anti_aliasing=True)
-#    salida = (ares >= 0.45).astype(np.bool)
-#    print("achicar a proporcion",proporcion,100*np.sum(salida)/np.prod(salida.shape))
-#    return salida
+def imsave(fname,img):
+    aux = img.copy()
+    aux -= np.min(aux)
+    aux = np.uint8(255*aux/max(1e-10,np.max(aux)))
+    Image.fromarray(aux).save(fname)
 
 #---------------------------------------------------------------------------------------
 
@@ -106,13 +106,13 @@ def detector_fft_un_sello(image_scales,seal_scales):
     # factores de normalizacion
     #
     scores = dict()
-    Gtotal = np.zeros(image_scales[0.5].shape)
     best_score = 0
     base_scale = np.max(list(seal_scales.keys()))
-    base_shape = image_scales[base_scale].shape
+    base_image,_ = image_scales[base_scale]
+    base_shape = base_image.shape
     Gtotal    =  np.zeros(base_shape)
     for s in seal_scales.keys():
-        Is  = image_scales[s]
+        Is,Isn  = image_scales[s]
         m,n = Is.shape
         seal_rotations = seal_scales[s]
         best_score = 0
@@ -122,7 +122,7 @@ def detector_fft_un_sello(image_scales,seal_scales):
         best_G = 0
         for a in seal_rotations.keys():
             ssr = seal_rotations[a]
-            G = dsp.fftconvolve( Is, np.flipud(ssr), mode='same' ) 
+            G = dsp.fftconvolve( Is, np.flipud(ssr), mode='same' ) / Isn 
             limax = np.argmax( G )
             imax  = limax // n
             jmax  = limax - imax*n
@@ -152,12 +152,16 @@ def detector_fft_un_sello(image_scales,seal_scales):
     
 #---------------------------------------------------------------------------------------
 
-def detector_fft(I,seals):
-    maxw = 0
+def detector_fft(I,seals,args):
+    cachedir = args["cachedir"]
+    imgname  = args["name"]
+    if not os.path.exists(cachedir):
+        os.makedirs(cachedir)
+    maxw = 0 
     maxh = 0
-    scales = (0.5,0.25,0.125)
-    scales = (0.7,0.6,0.5,0.4)
-    angles = np.arange(-3,3.25,0.25)
+    scales = list()
+    scales.append(0.25)
+    angles = np.arange(-3,3.5,0.5)
     #print("Precomputing scales and rotations")
     #
     # tamaño comun para todos los sellos
@@ -167,18 +171,34 @@ def detector_fft(I,seals):
             maxh = seals[i].shape[0]
         if seals[i].shape[1] > maxw:
             maxw = seals[i].shape[1]
-    plantilla0 = np.zeros((maxh,maxw))
-    plantilla1 = np.ones ((maxh,maxw))
-    #
+    #jp
     # precalcular imagenes escaladas y normalizadas
     #
     # usamos una convolucion para estimar la norma 2 de cada patch de la imagen
     # es la raiz de la suma del cuadrado de los pixeles en cada patch
     image_scales = dict()
     for s in scales:
-        image_scales[s] =  reducir( I, s )
-        In  = dsp.fftconvolve( image_scales[s]**2, plantilla1, mode='same' )
-        image_scales[s] /= np.sqrt(np.maximum(In,1)) 
+        maxhs = int(np.ceil(1.1*maxh*s))
+        maxws = int(np.ceil(1.1*maxw*s))
+        plantilla1 = np.ones((maxhs,maxws))
+        fcache = os.path.join(cachedir,f"{imgname}-scale{s:5.3f}.npy")
+        if not os.path.exists(fcache):
+            Is =  reducir( I, s )
+            Isn  = dsp.fftconvolve( Is**2, plantilla1, mode='same' )
+            Isn = np.sqrt(np.maximum(Isn,1e-16))
+            np.save(fcache,Is)            
+            fcache = os.path.join(cachedir,f"{imgname}-scale{s:5.3f}.jpg")
+            imsave(fcache,Is)
+            fcache = os.path.join(cachedir,f"{imgname}-scale{s:5.3f}-norm.npy")
+            np.save(fcache,Isn)            
+            fcache = os.path.join(cachedir,f"{imgname}-scale{s:5.3f}-norm.jpg")
+            imsave(fcache,Isn)
+            image_scales[s] = (Is, Isn)            
+        else:
+            Is = np.load(fcache)
+            fcache = os.path.join(cachedir,f"{imgname}-scale{s:5.3f}-norm.npy")
+            Isn = np.load(fcache)
+            image_scales[s] = (Is, Isn)            
     #
     # precalcular sellos escalados, rotados y normalizados
     #
@@ -191,14 +211,17 @@ def detector_fft(I,seals):
         for s in scales:
             #print(f"\tscale {s}")
             seal_scales[s] = dict()
+            maxhs = int(np.ceil(1.1*maxh*s))
+            maxws = int(np.ceil(1.1*maxw*s))
             for a in angles:
                 #print(f"\t\tangle {a}")
                 ssr = reducir( ndimage.rotate( seal, a ), s ) 
                 sh,sw = ssr.shape
-                sn    = 1.0 / np.linalg.norm( ssr.ravel() )
-                aux   = plantilla0.copy()
-                ioff  = ( maxh - sh ) // 2
-                joff  = ( maxw - sw ) // 2
+                sn    = 1.0 / np.linalg.norm( ssr.ravel() )                
+                aux = np.zeros((maxhs,maxws))
+                ioff  = ( maxhs - sh ) // 2
+                joff  = ( maxws - sw ) // 2
+                #print(maxhs,ioff,sh,maxws,joff,sw)
                 aux[ ioff:ioff+sh, joff:joff+sw ] = ssr*sn
                 seal_scales[s][a] = aux
         score = detector_fft_un_sello( image_scales, seal_scales )
@@ -207,14 +230,6 @@ def detector_fft(I,seals):
     return scores
 #---------------------------------------------------------------------------------------
 
-def evaluar_detectores(img,seals,methods):
-    return [ m(img,seals) for m in methods]
-
-#---------------------------------------------------------------------------------------
-
-def detector_nulo(img,seals):
-    det = np.zeros(len(seals),dtype=np.float)
-    return det
 
 #---------------------------------------------------------------------------------------
 
@@ -225,6 +240,8 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument("-d", "--datadir", type=str, default="../datos",
       help="path prefix  where to find files")
+    ap.add_argument("-c", "--cachedir", type=str, default="../cache",
+      help="path prefix  where to find cache files")
     ap.add_argument("-o","--outdir", type=str, default="../results",
       help="where to store results")
     ap.add_argument("-l","--list", type=str, default="../datos/r0566.list",
@@ -239,6 +256,7 @@ if __name__ == '__main__':
     #
     prefix = args["datadir"]
     outdir = args["outdir"]
+    cachedir = args["cachedir"]
     #
     # cargamos sellos
     #
@@ -305,6 +323,7 @@ if __name__ == '__main__':
             if not os.path.exists(foutdir):
                 os.makedirs(foutdir)
 
+
             output_fname = os.path.join(foutdir,fname)
             input_fname = os.path.join(prefix,relfname)
             #
@@ -317,8 +336,10 @@ if __name__ == '__main__':
             # 
             gt = ground_truth[fbase] 
             print("\ttruth:",gt)
-            detecciones = evaluar_detectores(img, sellos, detectores)
-            print("\tscore:",[np.round(d,2) for d in detecciones])
+            args["reldir"] = reldir
+            args["name"]   = fbase
+            scores = detector_fft(img,sellos,args)
+            print("\tscore:",[np.round(d,2) for d in scores])
             #---------------------------------------------------
         #
         # fin para cada archivo en la lista
